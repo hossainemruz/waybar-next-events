@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"sort"
 	"strings"
 	"time"
@@ -30,11 +31,11 @@ func (r *Result) Print() error {
 		todayEvents = groups[0].Events
 	}
 
-	// Find ongoing event (skip multi-day; if multiple, pick the latest-started)
+	// Find ongoing event (skip all-day events; if multiple, pick the latest-started)
 	var ongoingEvent *Event
 	for i := range todayEvents {
 		e := &todayEvents[i]
-		if isMultiDay(*e) {
+		if e.IsAllDay() {
 			continue
 		}
 		if !e.Start.After(now) && e.End.After(now) {
@@ -46,13 +47,13 @@ func (r *Result) Print() error {
 
 	if ongoingEvent != nil {
 		remaining := ongoingEvent.End.Sub(now)
-		output.Text = fmt.Sprintf("󰺏 %s (ends in %s)", ongoingEvent.Title, formatDuration(remaining))
+		output.Text = fmt.Sprintf("󰺏 %s (ends in %s)", html.EscapeString(ongoingEvent.Title), formatDuration(remaining))
 	} else {
-		// Find next upcoming event for today (skip multi-day)
+		// Find next upcoming event for today (skip all-day events)
 		var nextEvent *Event
 		for i := range todayEvents {
 			e := &todayEvents[i]
-			if isMultiDay(*e) {
+			if e.IsAllDay() {
 				continue
 			}
 			if e.Start.After(now) {
@@ -63,7 +64,7 @@ func (r *Result) Print() error {
 
 		if nextEvent != nil {
 			until := nextEvent.Start.Sub(now)
-			output.Text = fmt.Sprintf("󰃰 %s (starts in %s)", nextEvent.Title, formatDuration(until))
+			output.Text = fmt.Sprintf("󰃰 %s (starts in %s)", html.EscapeString(nextEvent.Title), formatDuration(until))
 		} else {
 			output.Text = " No more events today!"
 		}
@@ -73,8 +74,13 @@ func (r *Result) Print() error {
 	var tooltipEntries []string
 	for i, g := range groups {
 		tooltipEntries = append(tooltipEntries, fmt.Sprintf("<b>%s</b>", g.Day))
+		var line string
 		for _, e := range g.Events {
-			line := fmt.Sprintf("%7s - %7s %s", e.Start.Format("3:04PM"), e.End.Format("3:04PM"), e.Title)
+			if e.IsAllDay() {
+				line = fmt.Sprintf("%s              %s", "All day", html.EscapeString(e.Title))
+			} else {
+				line = fmt.Sprintf("%7s - %7s    %s", e.Start.Format("3:04PM"), e.End.Format("3:04PM"), html.EscapeString(e.Title))
+			}
 			// Past events for today get a check mark
 			if g.Day == "Today" && !e.End.After(now) {
 				line = line + " ✓"
@@ -94,13 +100,6 @@ func (r *Result) Print() error {
 	}
 	fmt.Println(string(jsonBytes))
 	return nil
-}
-
-// isMultiDay returns true if the event spans across different calendar days.
-func isMultiDay(e Event) bool {
-	startDate := time.Date(e.Start.Year(), e.Start.Month(), e.Start.Day(), 0, 0, 0, 0, e.Start.Location())
-	endDate := time.Date(e.End.Year(), e.End.Month(), e.End.Day(), 0, 0, 0, 0, e.End.Location())
-	return !startDate.Equal(endDate)
 }
 
 // formatDuration formats a duration as a human-readable string like "1h 25m" or "45m".
