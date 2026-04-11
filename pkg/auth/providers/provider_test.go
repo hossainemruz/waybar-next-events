@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"golang.org/x/oauth2"
 )
 
@@ -46,7 +47,7 @@ func TestValidate(t *testing.T) {
 				clientID:    "client-id",
 				authURL:     "https://example.com/auth",
 				tokenURL:    "https://example.com/token",
-				redirectURL: "http://127.0.0.1:18751/callback",
+				redirectURL: config.DefaultCallbackURL,
 				scopes:      []string{"scope1"},
 			},
 			wantErr: false,
@@ -64,7 +65,7 @@ func TestValidate(t *testing.T) {
 				clientID:    "client-id",
 				authURL:     "https://example.com/auth",
 				tokenURL:    "https://example.com/token",
-				redirectURL: "http://127.0.0.1:18751/callback",
+				redirectURL: config.DefaultCallbackURL,
 			},
 			wantErr: true,
 			errMsg:  "provider name cannot be empty",
@@ -76,7 +77,7 @@ func TestValidate(t *testing.T) {
 				clientID:    "",
 				authURL:     "https://example.com/auth",
 				tokenURL:    "https://example.com/token",
-				redirectURL: "http://127.0.0.1:18751/callback",
+				redirectURL: config.DefaultCallbackURL,
 			},
 			wantErr: true,
 			errMsg:  "client ID cannot be empty",
@@ -88,7 +89,7 @@ func TestValidate(t *testing.T) {
 				clientID:    "client-id",
 				authURL:     "",
 				tokenURL:    "https://example.com/token",
-				redirectURL: "http://127.0.0.1:18751/callback",
+				redirectURL: config.DefaultCallbackURL,
 			},
 			wantErr: true,
 			errMsg:  "auth URL cannot be empty",
@@ -100,7 +101,7 @@ func TestValidate(t *testing.T) {
 				clientID:    "client-id",
 				authURL:     "https://example.com/auth",
 				tokenURL:    "",
-				redirectURL: "http://127.0.0.1:18751/callback",
+				redirectURL: config.DefaultCallbackURL,
 			},
 			wantErr: true,
 			errMsg:  "token URL cannot be empty",
@@ -118,16 +119,28 @@ func TestValidate(t *testing.T) {
 			errMsg:  "redirect URL cannot be empty",
 		},
 		{
-			name: "invalid redirect URL host",
+			name: "redirect URL wrong port",
 			provider: &mockProvider{
 				name:        "test",
 				clientID:    "client-id",
 				authURL:     "https://example.com/auth",
 				tokenURL:    "https://example.com/token",
-				redirectURL: "http://example.com/callback",
+				redirectURL: "http://127.0.0.1:9999/callback",
 			},
 			wantErr: true,
-			errMsg:  "redirect URL must use 127.0.0.1",
+			errMsg:  "redirect URL must be " + config.DefaultCallbackURL,
+		},
+		{
+			name: "redirect URL wrong path",
+			provider: &mockProvider{
+				name:        "test",
+				clientID:    "client-id",
+				authURL:     "https://example.com/auth",
+				tokenURL:    "https://example.com/token",
+				redirectURL: "http://127.0.0.1:18751/oauth/callback",
+			},
+			wantErr: true,
+			errMsg:  "redirect URL must be " + config.DefaultCallbackURL,
 		},
 		{
 			name: "redirect URL using localhost instead of 127.0.0.1",
@@ -139,19 +152,7 @@ func TestValidate(t *testing.T) {
 				redirectURL: "http://localhost:18751/callback",
 			},
 			wantErr: true,
-			errMsg:  "redirect URL must use 127.0.0.1",
-		},
-		{
-			name: "redirect URL missing port",
-			provider: &mockProvider{
-				name:        "test",
-				clientID:    "client-id",
-				authURL:     "https://example.com/auth",
-				tokenURL:    "https://example.com/token",
-				redirectURL: "http://127.0.0.1/callback",
-			},
-			wantErr: true,
-			errMsg:  "redirect URL must specify a port",
+			errMsg:  "redirect URL must be " + config.DefaultCallbackURL,
 		},
 		{
 			name: "redirect URL using https scheme",
@@ -163,7 +164,31 @@ func TestValidate(t *testing.T) {
 				redirectURL: "https://127.0.0.1:18751/callback",
 			},
 			wantErr: true,
-			errMsg:  "redirect URL must use http scheme",
+			errMsg:  "redirect URL must be " + config.DefaultCallbackURL,
+		},
+		{
+			name: "redirect URL missing port",
+			provider: &mockProvider{
+				name:        "test",
+				clientID:    "client-id",
+				authURL:     "https://example.com/auth",
+				tokenURL:    "https://example.com/token",
+				redirectURL: "http://127.0.0.1/callback",
+			},
+			wantErr: true,
+			errMsg:  "redirect URL must be " + config.DefaultCallbackURL,
+		},
+		{
+			name: "redirect URL external host",
+			provider: &mockProvider{
+				name:        "test",
+				clientID:    "client-id",
+				authURL:     "https://example.com/auth",
+				tokenURL:    "https://example.com/token",
+				redirectURL: "http://example.com:18751/callback",
+			},
+			wantErr: true,
+			errMsg:  "redirect URL must be " + config.DefaultCallbackURL,
 		},
 	}
 

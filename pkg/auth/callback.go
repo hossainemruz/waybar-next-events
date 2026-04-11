@@ -110,10 +110,16 @@ func (s *CallbackServer) Shutdown() {
 
 // URL returns the callback URL that should be registered with the OAuth provider.
 func (s *CallbackServer) URL() string {
-	return "http://" + callbackHost + callbackPath
+	return config.DefaultCallbackURL
 }
 
 // handleCallback processes the OAuth2 callback request.
+//
+// Security: the state parameter is validated BEFORE marking the flow as
+// "responded". This prevents any local process or spoofed request with a wrong
+// or missing state from consuming the single-callback slot, which would
+// otherwise block the legitimate provider redirect. Only after the state is
+// confirmed do we mark the server as responded and deliver the result.
 func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// Only accept GET requests
 	if r.Method != http.MethodGet {
@@ -121,16 +127,28 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Protect against duplicate or late callbacks
+	// Parse query parameters
+	query := r.URL.Query()
+
+	// Validate state parameter first (CSRF protection).
+	// Both success and error callbacks from the OAuth2 provider must echo the
+	// state parameter. Requests without a valid state are rejected without
+	// consuming the callback slot so the legitimate redirect can still arrive.
+	state := query.Get("state")
+	if state != s.expectedState {
+		http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+		return
+	}
+
+	// State is valid — claim the single callback slot.
+	// After this point no other request (even with a valid state) will be
+	// accepted, which prevents duplicate callbacks from interfering.
 	if !s.responded.CompareAndSwap(false, true) {
 		http.Error(w, "Callback already processed", http.StatusGone)
 		return
 	}
 
-	// Parse query parameters
-	query := r.URL.Query()
-
-	// Check for provider error response first
+	// Check for provider error response (e.g. user denied consent).
 	if errCode := query.Get("error"); errCode != "" {
 		result := CallbackResult{
 			Error:     errCode,
@@ -141,18 +159,6 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "<html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this tab.</p></body></html>", html.EscapeString(errCode))
-		return
-	}
-
-	// Validate state parameter (CSRF protection)
-	state := query.Get("state")
-	if state != s.expectedState {
-		result := CallbackResult{
-			Error: "state_mismatch",
-		}
-		s.resultChan <- result
-
-		http.Error(w, "Invalid state parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -168,7 +174,7 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Success - send result and return success page
+	// Success — send result and return success page
 	result := CallbackResult{
 		Code:  code,
 		State: state,

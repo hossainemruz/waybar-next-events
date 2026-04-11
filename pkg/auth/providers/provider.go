@@ -3,8 +3,8 @@ package providers
 
 import (
 	"fmt"
-	"net/url"
 
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"golang.org/x/oauth2"
 )
 
@@ -29,7 +29,7 @@ type Provider interface {
 	TokenURL() string
 
 	// RedirectURL returns the callback URL.
-	// Must use 127.0.0.1 as the host.
+	// Must equal config.DefaultCallbackURL for the OAuth flow to work.
 	RedirectURL() string
 
 	// Scopes returns the OAuth2 scopes to request.
@@ -70,25 +70,12 @@ func Validate(p Provider) error {
 		return fmt.Errorf("provider %s: redirect URL cannot be empty", p.Name())
 	}
 
-	// Parse and validate redirect URL
-	redirectURL, err := url.Parse(p.RedirectURL())
-	if err != nil {
-		return fmt.Errorf("provider %s: invalid redirect URL: %w", p.Name(), err)
-	}
-
-	// Security: Only allow localhost callbacks
-	if redirectURL.Hostname() != "127.0.0.1" {
-		return fmt.Errorf("provider %s: redirect URL must use 127.0.0.1, got %s", p.Name(), redirectURL.Hostname())
-	}
-
-	// Security: Require HTTP scheme for localhost
-	if redirectURL.Scheme != "http" {
-		return fmt.Errorf("provider %s: redirect URL must use http scheme", p.Name())
-	}
-
-	// Validate that a port is specified (required for loopback redirects)
-	if redirectURL.Port() == "" {
-		return fmt.Errorf("provider %s: redirect URL must specify a port", p.Name())
+	// Security: the redirect URL must match the exact callback URL that the
+	// local callback server serves. This prevents providers from validating
+	// successfully with a redirect URL whose port or path does not match the
+	// server, which would cause every OAuth flow to fail at runtime.
+	if p.RedirectURL() != config.DefaultCallbackURL {
+		return fmt.Errorf("provider %s: redirect URL must be %s, got %s", p.Name(), config.DefaultCallbackURL, p.RedirectURL())
 	}
 
 	return nil

@@ -66,14 +66,27 @@ func TestCallbackServer(t *testing.T) {
 		server.Start()
 		time.Sleep(10 * time.Millisecond)
 
+		// A request with wrong state should NOT consume the callback slot.
+		// It should receive a 400 response but the flow should remain open.
 		resp, err := http.Get("http://127.0.0.1:18751/callback?code=auth-code&state=" + wrongState)
+		if err != nil {
+			t.Fatalf("HTTP GET error = %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Wrong-state Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+
+		// The flow should still be open, so a valid callback should succeed.
+		resp, err = http.Get("http://127.0.0.1:18751/callback?code=auth-code&state=" + expectedState)
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusBadRequest {
-			t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Valid callback Status = %d, want %d", resp.StatusCode, http.StatusOK)
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -84,8 +97,14 @@ func TestCallbackServer(t *testing.T) {
 			t.Fatalf("Wait() error = %v", err)
 		}
 
-		if result.Error != "state_mismatch" {
-			t.Errorf("Error = %s, want state_mismatch", result.Error)
+		if result.Code != "auth-code" {
+			t.Errorf("Code = %s, want auth-code", result.Code)
+		}
+		if result.State != expectedState {
+			t.Errorf("State = %s, want %s", result.State, expectedState)
+		}
+		if result.Error != "" {
+			t.Errorf("Error = %s, want empty", result.Error)
 		}
 	})
 
@@ -136,7 +155,9 @@ func TestCallbackServer(t *testing.T) {
 		server.Start()
 		time.Sleep(10 * time.Millisecond)
 
-		resp, err := http.Get("http://127.0.0.1:18751/callback?error=access_denied&error_description=user+denied")
+		// Provider error callbacks should include state validation.
+		// A valid state should be accepted.
+		resp, err := http.Get("http://127.0.0.1:18751/callback?error=access_denied&error_description=user+denied&state=" + expectedState)
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
@@ -159,6 +180,104 @@ func TestCallbackServer(t *testing.T) {
 		}
 		if result.ErrorDesc != "user denied" {
 			t.Errorf("ErrorDesc = %s, want 'user denied'", result.ErrorDesc)
+		}
+	})
+
+	t.Run("ProviderErrorWithWrongState", func(t *testing.T) {
+		expectedState := "correct-state"
+		wrongState := "wrong-state"
+
+		server, err := NewCallbackServer(expectedState)
+		if err != nil {
+			t.Fatalf("NewCallbackServer() error = %v", err)
+		}
+		defer server.Shutdown()
+
+		server.Start()
+		time.Sleep(10 * time.Millisecond)
+
+		// An error callback with wrong state should NOT consume the flow.
+		resp, err := http.Get("http://127.0.0.1:18751/callback?error=access_denied&error_description=spoofed&state=" + wrongState)
+		if err != nil {
+			t.Fatalf("HTTP GET error = %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("Wrong-state error Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+
+		// The valid callback should still succeed after the spoofed error.
+		resp, err = http.Get("http://127.0.0.1:18751/callback?code=auth-code&state=" + expectedState)
+		if err != nil {
+			t.Fatalf("HTTP GET error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Valid callback Status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		result, err := server.Wait(ctx)
+		if err != nil {
+			t.Fatalf("Wait() error = %v", err)
+		}
+
+		if result.Code != "auth-code" {
+			t.Errorf("Code = %s, want auth-code", result.Code)
+		}
+		if result.Error != "" {
+			t.Errorf("Error = %s, want empty", result.Error)
+		}
+	})
+
+	t.Run("ProviderErrorWithoutState", func(t *testing.T) {
+		expectedState := "test-state"
+
+		server, err := NewCallbackServer(expectedState)
+		if err != nil {
+			t.Fatalf("NewCallbackServer() error = %v", err)
+		}
+		defer server.Shutdown()
+
+		server.Start()
+		time.Sleep(10 * time.Millisecond)
+
+		// An error callback with NO state should NOT consume the flow.
+		resp, err := http.Get("http://127.0.0.1:18751/callback?error=access_denied&error_description=no+state")
+		if err != nil {
+			t.Fatalf("HTTP GET error = %v", err)
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("No-state error Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+		}
+
+		// The valid callback should still succeed.
+		resp, err = http.Get("http://127.0.0.1:18751/callback?code=auth-code&state=" + expectedState)
+		if err != nil {
+			t.Fatalf("HTTP GET error = %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Valid callback Status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		result, err := server.Wait(ctx)
+		if err != nil {
+			t.Fatalf("Wait() error = %v", err)
+		}
+
+		if result.Code != "auth-code" {
+			t.Errorf("Code = %s, want auth-code", result.Code)
 		}
 	})
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
 	"golang.org/x/oauth2"
@@ -58,7 +59,7 @@ func TestAuthenticator_ValidToken(t *testing.T) {
 		clientID:    "client-id",
 		authURL:     "https://example.com/auth",
 		tokenURL:    "https://example.com/token",
-		redirectURL: "http://127.0.0.1:18751/callback",
+		redirectURL: config.DefaultCallbackURL,
 		scopes:      []string{"read"},
 	}
 
@@ -95,7 +96,7 @@ func TestAuthenticator_ExpiredTokenNoRefresh(t *testing.T) {
 		clientID:    "client-id",
 		authURL:     "https://example.com/auth",
 		tokenURL:    "https://example.com/token",
-		redirectURL: "http://127.0.0.1:18751/callback",
+		redirectURL: config.DefaultCallbackURL,
 		scopes:      []string{"read"},
 	}
 
@@ -128,7 +129,7 @@ func TestAuthenticator_ClearToken(t *testing.T) {
 		clientID:    "client-id",
 		authURL:     "https://example.com/auth",
 		tokenURL:    "https://example.com/token",
-		redirectURL: "http://127.0.0.1:18751/callback",
+		redirectURL: config.DefaultCallbackURL,
 		scopes:      []string{"read"},
 	}
 
@@ -319,7 +320,7 @@ func TestAuthenticator_TokenRefresh(t *testing.T) {
 		clientID:    "client-id",
 		authURL:     mockServer.URL + "/auth",
 		tokenURL:    mockServer.URL + "/token",
-		redirectURL: "http://127.0.0.1:18751/callback",
+		redirectURL: config.DefaultCallbackURL,
 		scopes:      []string{"read"},
 	}
 
