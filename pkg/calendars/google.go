@@ -13,11 +13,19 @@ import (
 	"google.golang.org/api/option"
 )
 
-// GoogleCalendarClientIDEnv is the environment variable name for Google OAuth client ID.
-const GoogleCalendarClientIDEnv = "GOOGLE_CALENDAR_CLIENT_ID"
+// Environment variable names for Google OAuth credentials.
+// These should be set in your environment before running the application.
+const (
+	// GoogleOAuthClientIDEnv is the environment variable name for Google OAuth client ID.
+	GoogleOAuthClientIDEnv = "GOOGLE_OAUTH_CLIENT_ID"
+	// GoogleOAuthClientSecretEnv is the environment variable name for Google OAuth client secret.
+	GoogleOAuthClientSecretEnv = "GOOGLE_OAUTH_CLIENT_SECRET"
+)
 
-// GoogleCalendarClientSecretEnv is the environment variable name for Google OAuth client secret.
-const GoogleCalendarClientSecretEnv = "GOOGLE_CALENDAR_CLIENT_SECRET"
+// defaultAuthenticator is a shared authenticator instance for calendar operations.
+// This avoids creating a new authenticator on every call, which would miss any
+// future in-memory token cache optimizations.
+var defaultAuthenticator = auth.NewAuthenticator(nil)
 
 // getCalendarClient returns a Google Calendar service client with automatic
 // authentication and token refresh using the keyring-backed auth package.
@@ -25,12 +33,12 @@ func getCalendarClient() (*calendar.Service, error) {
 	ctx := context.Background()
 
 	// Get credentials from environment
-	clientID := os.Getenv(GoogleCalendarClientIDEnv)
+	clientID := os.Getenv(GoogleOAuthClientIDEnv)
 	if clientID == "" {
-		return nil, fmt.Errorf("environment variable %s not set", GoogleCalendarClientIDEnv)
+		return nil, fmt.Errorf("environment variable %s not set", GoogleOAuthClientIDEnv)
 	}
 
-	clientSecret := os.Getenv(GoogleCalendarClientSecretEnv)
+	clientSecret := os.Getenv(GoogleOAuthClientSecretEnv)
 	// clientSecret may be empty for public clients
 
 	// Create Google OAuth provider
@@ -40,11 +48,8 @@ func getCalendarClient() (*calendar.Service, error) {
 		[]string{calendar.CalendarReadonlyScope},
 	)
 
-	// Create authenticator with default keyring store
-	authenticator := auth.NewAuthenticator(nil)
-
 	// Get HTTP client with automatic token refresh
-	client, err := authenticator.HTTPClient(ctx, googleProvider)
+	client, err := defaultAuthenticator.HTTPClient(ctx, googleProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticated client: %w", err)
 	}
@@ -87,15 +92,14 @@ func GoogleEvents() ([]types.Event, error) {
 	return convertGoogleEvents(events.Items, dayLimit, today)
 }
 
-// GogoleEvent is an alias for GoogleEvents for backward compatibility.
-// Deprecated: Use GoogleEvents() instead.
-func GogoleEvent() ([]types.Event, error) {
-	return GoogleEvents()
-}
-
 func convertGoogleEvents(gEvents []*calendar.Event, dayLimit int, today time.Time) ([]types.Event, error) {
 	events := make([]types.Event, 0)
 	for _, item := range gEvents {
+		// Skip nil items (defensive check against malformed API responses)
+		if item == nil {
+			continue
+		}
+
 		title := item.Summary
 		if title == "" {
 			title = "<Event title missing>"

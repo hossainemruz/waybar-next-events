@@ -86,9 +86,9 @@ func Validate(p Provider) error {
 		return fmt.Errorf("provider %s: redirect URL must use http scheme", p.Name())
 	}
 
-	// Validate port matches expected callback server port
-	if redirectURL.Port() != "18751" {
-		return fmt.Errorf("provider %s: redirect URL must use port 18751, got port %s", p.Name(), redirectURL.Port())
+	// Validate that a port is specified (required for loopback redirects)
+	if redirectURL.Port() == "" {
+		return fmt.Errorf("provider %s: redirect URL must specify a port", p.Name())
 	}
 
 	return nil

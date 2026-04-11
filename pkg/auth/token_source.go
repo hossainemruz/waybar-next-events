@@ -50,6 +50,11 @@ func (s *persistingTokenSource) Token() (*oauth2.Token, error) {
 }
 
 // tokensEqual checks if two tokens are equal.
+// Note: This intentionally does not compare the Extra map (which may contain
+// id_token or other provider-specific claims). This is acceptable because:
+// 1. The first refresh will always be persisted (lastToken starts as nil)
+// 2. Subsequent refreshes that don't change access/refresh tokens are safe to skip
+// 3. Extra data is typically id_token which is not needed for calendar access
 func tokensEqual(a, b *oauth2.Token) bool {
 	if a == nil || b == nil {
 		return a == b

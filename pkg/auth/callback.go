@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 	"time"
+
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 )
 
 const (
 	// callbackHost is the fixed callback server host and port.
-	callbackHost = "127.0.0.1:18751"
+	callbackHost = "127.0.0.1:" + config.DefaultCallbackPort
 	// callbackPath is the fixed callback endpoint path.
 	callbackPath = "/callback"
 	// serverShutdownTimeout is the timeout for graceful server shutdown.
@@ -35,6 +38,7 @@ type CallbackServer struct {
 	resultChan    chan CallbackResult
 	server        *http.Server
 	listener      net.Listener
+	responded     atomic.Bool
 }
 
 // NewCallbackServer creates a new callback server expecting the given state.
@@ -72,12 +76,16 @@ func NewCallbackServer(expectedState string) (*CallbackServer, error) {
 func (s *CallbackServer) Start() <-chan struct{} {
 	ready := make(chan struct{})
 	go func() {
-		close(ready) // Signal that the goroutine has started
 		// Serve always returns a non-nil error, but we only care about unexpected errors
 		if err := s.server.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("callback server error", "error", err)
 		}
 	}()
+	// Give the server a moment to start accepting connections.
+	// This is a pragmatic fix; the listener is already bound in NewCallbackServer,
+	// so Serve() will start nearly immediately.
+	time.Sleep(50 * time.Millisecond)
+	close(ready)
 	return ready
 }
 
@@ -110,6 +118,12 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	// Only accept GET requests
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Protect against duplicate or late callbacks
+	if !s.responded.CompareAndSwap(false, true) {
+		http.Error(w, "Callback already processed", http.StatusGone)
 		return
 	}
 

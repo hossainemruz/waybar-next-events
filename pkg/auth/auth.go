@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"runtime"
@@ -19,6 +20,10 @@ const (
 	authTimeout = 5 * time.Minute
 	// refreshTimeout is the maximum time to wait for token refresh.
 	refreshTimeout = 30 * time.Second
+	// exchangeTimeout is the maximum time to wait for token exchange.
+	exchangeTimeout = 30 * time.Second
+	// storeTimeout is the maximum time to wait for token store operations.
+	storeTimeout = 5 * time.Second
 )
 
 // Common errors returned by the authenticator.
@@ -38,22 +43,31 @@ type Authenticator struct {
 	browserOpener func(url string) error
 }
 
-// NewAuthenticator creates a new authenticator with the given token store.
-// If store is nil, a default KeyringTokenStore is used.
-func NewAuthenticator(store tokenstore.TokenStore) *Authenticator {
-	if store == nil {
-		store = tokenstore.NewKeyringTokenStore()
-	}
-	return &Authenticator{
-		store:         store,
-		browserOpener: defaultBrowserOpener,
+// AuthenticatorOption configures an Authenticator.
+type AuthenticatorOption func(*Authenticator)
+
+// WithBrowserOpener sets a custom browser opener function.
+// This is useful for testing.
+func WithBrowserOpener(opener func(url string) error) AuthenticatorOption {
+	return func(a *Authenticator) {
+		a.browserOpener = opener
 	}
 }
 
-// setBrowserOpener sets a custom browser opener function.
-// This is useful for testing.
-func (a *Authenticator) setBrowserOpener(opener func(url string) error) {
-	a.browserOpener = opener
+// NewAuthenticator creates a new authenticator with the given token store.
+// If store is nil, a default KeyringTokenStore is used.
+func NewAuthenticator(store tokenstore.TokenStore, opts ...AuthenticatorOption) *Authenticator {
+	if store == nil {
+		store = tokenstore.NewKeyringTokenStore()
+	}
+	a := &Authenticator{
+		store:         store,
+		browserOpener: defaultBrowserOpener,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Authenticate returns a valid token for the provider.
@@ -62,6 +76,8 @@ func (a *Authenticator) setBrowserOpener(opener func(url string) error) {
 // 2. Try to refresh an expired token if a refresh token exists
 // 3. Start a full OAuth flow if needed
 func (a *Authenticator) Authenticate(ctx context.Context, provider providers.Provider) (*oauth2.Token, error) {
+	slog.Debug("starting authentication", "provider", provider.Name())
+
 	// Validate provider configuration
 	if err := providers.Validate(provider); err != nil {
 		return nil, fmt.Errorf("invalid provider: %w", err)
@@ -74,10 +90,14 @@ func (a *Authenticator) Authenticate(ctx context.Context, provider providers.Pro
 	}
 
 	if found {
+		slog.Debug("found existing token", "provider", provider.Name(), "valid", token.Valid())
+
 		// Check if token is still valid
 		if token.Valid() {
 			return token, nil
 		}
+
+		slog.Debug("token expired, attempting refresh", "provider", provider.Name())
 
 		// Token is expired - try to refresh if we have a refresh token
 		if token.RefreshToken != "" {
@@ -87,22 +107,36 @@ func (a *Authenticator) Authenticate(ctx context.Context, provider providers.Pro
 			defer cancel()
 			refreshed, err := a.refreshToken(refreshCtx, provider, token)
 			if err == nil {
-				// Save refreshed token
-				if err := a.store.Set(ctx, provider.Name(), refreshed); err != nil {
+				// Save refreshed token using a background context to avoid
+				// cancellation from the caller's expired context
+				saveCtx, saveCancel := context.WithTimeout(context.Background(), storeTimeout)
+				defer saveCancel()
+				if err := a.store.Set(saveCtx, provider.Name(), refreshed); err != nil {
 					return nil, fmt.Errorf("failed to save refreshed token: %w", err)
 				}
+				slog.Debug("token refreshed successfully", "provider", provider.Name())
 				return refreshed, nil
 			}
 
+			slog.Debug("token refresh failed, clearing token", "provider", provider.Name(), "error", err)
+
 			// Refresh failed - clear the invalid token and require re-auth
-			_ = a.store.Clear(ctx, provider.Name())
+			clearCtx, clearCancel := context.WithTimeout(context.Background(), storeTimeout)
+			defer clearCancel()
+			_ = a.store.Clear(clearCtx, provider.Name())
 			return nil, fmt.Errorf("%w: %v", ErrReauthRequired, err)
 		}
 
+		slog.Debug("no refresh token available, requiring re-auth", "provider", provider.Name())
+
 		// No refresh token available - require re-auth
-		_ = a.store.Clear(ctx, provider.Name())
+		clearCtx, clearCancel := context.WithTimeout(context.Background(), storeTimeout)
+		defer clearCancel()
+		_ = a.store.Clear(clearCtx, provider.Name())
 		return nil, ErrReauthRequired
 	}
+
+	slog.Debug("no token found, starting OAuth flow", "provider", provider.Name())
 
 	// No token found - perform full OAuth flow
 	return a.performOAuthFlow(ctx, provider)
@@ -178,6 +212,8 @@ func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers
 		return nil, fmt.Errorf("failed to generate state: %w", err)
 	}
 
+	slog.Debug("generated PKCE and state", "provider", provider.Name())
+
 	// Build authorization URL
 	authOpts := []oauth2.AuthCodeOption{
 		oauth2.SetAuthURLParam("code_challenge_method", pkce.Method),
@@ -198,10 +234,14 @@ func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers
 	ready := callbackServer.Start()
 	<-ready // Wait for server to start accepting connections
 
+	slog.Debug("callback server started", "provider", provider.Name(), "url", callbackServer.URL())
+
 	// Open browser
 	if err := a.browserOpener(authURL); err != nil {
 		return nil, fmt.Errorf("%w: %v (please open this URL manually: %s)", ErrBrowserOpenFailed, err, authURL)
 	}
+
+	slog.Debug("opened browser for authorization", "provider", provider.Name())
 
 	// Wait for callback with timeout
 	authCtx, cancel := context.WithTimeout(ctx, authTimeout)
@@ -215,6 +255,8 @@ func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers
 		return nil, fmt.Errorf("authorization failed: %w", err)
 	}
 
+	slog.Debug("received callback", "provider", provider.Name())
+
 	// Check for provider error
 	if result.Error != "" {
 		if result.ErrorDesc != "" {
@@ -223,21 +265,31 @@ func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers
 		return nil, fmt.Errorf("%w: %s", ErrProviderDenied, result.Error)
 	}
 
-	// Exchange code for token
+	// Exchange code for token using a dedicated timeout context
+	// to avoid cancellation from the caller's context
 	exchangeOpts := []oauth2.AuthCodeOption{
 		oauth2.SetAuthURLParam("code_verifier", pkce.Verifier),
 	}
 	exchangeOpts = append(exchangeOpts, provider.ExchangeOptions()...)
 
-	token, err := config.Exchange(ctx, result.Code, exchangeOpts...)
+	exchangeCtx, exchangeCancel := context.WithTimeout(context.Background(), exchangeTimeout)
+	defer exchangeCancel()
+
+	token, err := config.Exchange(exchangeCtx, result.Code, exchangeOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange failed: %w", err)
 	}
 
-	// Store the token
-	if err := a.store.Set(ctx, provider.Name(), token); err != nil {
+	slog.Debug("token exchange completed", "provider", provider.Name())
+
+	// Store the token using a background context to avoid cancellation
+	storeCtx, storeCancel := context.WithTimeout(context.Background(), storeTimeout)
+	defer storeCancel()
+	if err := a.store.Set(storeCtx, provider.Name(), token); err != nil {
 		return nil, fmt.Errorf("failed to save token: %w", err)
 	}
+
+	slog.Debug("token saved successfully", "provider", provider.Name())
 
 	return token, nil
 }

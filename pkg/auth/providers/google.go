@@ -2,6 +2,9 @@
 package providers
 
 import (
+	"fmt"
+
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/calendar/v3"
 )
@@ -11,10 +14,13 @@ const (
 	googleAuthURL = "https://accounts.google.com/o/oauth2/auth"
 	// googleTokenURL is Google's OAuth2 token endpoint.
 	googleTokenURL = "https://oauth2.googleapis.com/token"
-	// callbackURL is the fixed localhost callback URL.
-	// This must match the CallbackServer URL in the auth package.
-	callbackURL = "http://127.0.0.1:18751/callback"
 )
+
+// callbackURL returns the fixed localhost callback URL.
+// This must match the CallbackServer URL in the auth package.
+func callbackURL() string {
+	return fmt.Sprintf("http://127.0.0.1:%s/callback", config.DefaultCallbackPort)
+}
 
 // Google implements the auth.Provider interface for Google OAuth2.
 // It supports Google Calendar and other Google APIs.
@@ -65,7 +71,7 @@ func (g *Google) TokenURL() string {
 
 // RedirectURL returns the callback URL.
 func (g *Google) RedirectURL() string {
-	return callbackURL
+	return callbackURL()
 }
 
 // Scopes returns the OAuth2 scopes.

@@ -3,7 +3,6 @@ package tokenstore
 
 import (
 	"context"
-	"errors"
 
 	"golang.org/x/oauth2"
 )
@@ -25,9 +24,3 @@ type TokenStore interface {
 	// Returns nil if the token was successfully removed or did not exist.
 	Clear(ctx context.Context, providerName string) error
 }
-
-// Common errors returned by TokenStore implementations.
-var (
-	// ErrTokenNotFound indicates no token exists for the provider.
-	ErrTokenNotFound = errors.New("token not found")
-)

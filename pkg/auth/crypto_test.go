@@ -85,10 +85,9 @@ func TestGeneratePKCE(t *testing.T) {
 }
 
 func TestPKCEChallengeDerivation(t *testing.T) {
-	// Test that S256 challenge is correctly derived
-	// Using known test vectors from RFC 7636
-	// Example from RFC: verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-	// Expected challenge: "E9Melhoa2OwvFrEMTfqN30tiloB7MzFsn6kTwEfSiB8"
+	// Test that S256 challenge is correctly derived using RFC 7636 Appendix B test vector.
+	// verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	// S256 challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
 
 	testVerifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
 	expectedChallenge := "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"

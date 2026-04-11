@@ -142,16 +142,16 @@ func TestValidate(t *testing.T) {
 			errMsg:  "redirect URL must use 127.0.0.1",
 		},
 		{
-			name: "redirect URL using wrong port",
+			name: "redirect URL missing port",
 			provider: &mockProvider{
 				name:        "test",
 				clientID:    "client-id",
 				authURL:     "https://example.com/auth",
 				tokenURL:    "https://example.com/token",
-				redirectURL: "http://127.0.0.1:9999/callback",
+				redirectURL: "http://127.0.0.1/callback",
 			},
 			wantErr: true,
-			errMsg:  "redirect URL must use port 18751",
+			errMsg:  "redirect URL must specify a port",
 		},
 		{
 			name: "redirect URL using https scheme",

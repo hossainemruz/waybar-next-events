@@ -24,6 +24,7 @@ func NewKeyringTokenStore() *KeyringTokenStore {
 }
 
 // Set stores the token in the keyring for the given provider.
+// The context can be used to cancel the operation if the keyring service is unresponsive.
 func (s *KeyringTokenStore) Set(ctx context.Context, providerName string, token *oauth2.Token) error {
 	if providerName == "" {
 		return fmt.Errorf("provider name cannot be empty")
@@ -38,50 +39,92 @@ func (s *KeyringTokenStore) Set(ctx context.Context, providerName string, token 
 		return fmt.Errorf("failed to serialize token: %w", err)
 	}
 
-	// Store in keyring using provider name as the user/account identifier
-	if err := keyring.Set(serviceName, providerName, string(data)); err != nil {
-		return fmt.Errorf("keyring set failed: %w", err)
+	// Wrap keyring call in a goroutine to support context cancellation
+	type result struct {
+		err error
 	}
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{keyring.Set(serviceName, providerName, string(data))}
+	}()
 
-	return nil
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			return fmt.Errorf("keyring set failed: %w", r.err)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Get retrieves the token from the keyring for the given provider.
+// The context can be used to cancel the operation if the keyring service is unresponsive.
 func (s *KeyringTokenStore) Get(ctx context.Context, providerName string) (*oauth2.Token, bool, error) {
 	if providerName == "" {
 		return nil, false, fmt.Errorf("provider name cannot be empty")
 	}
 
-	data, err := keyring.Get(serviceName, providerName)
-	if err != nil {
-		if err == keyring.ErrNotFound {
-			return nil, false, nil
+	// Wrap keyring call in a goroutine to support context cancellation
+	type result struct {
+		data string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		data, err := keyring.Get(serviceName, providerName)
+		ch <- result{data, err}
+	}()
+
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			if r.err == keyring.ErrNotFound {
+				return nil, false, nil
+			}
+			return nil, false, fmt.Errorf("keyring get failed: %w", r.err)
 		}
-		return nil, false, fmt.Errorf("keyring get failed: %w", err)
-	}
 
-	var token oauth2.Token
-	if err := json.Unmarshal([]byte(data), &token); err != nil {
-		return nil, false, fmt.Errorf("failed to deserialize token: %w", err)
-	}
+		var token oauth2.Token
+		if err := json.Unmarshal([]byte(r.data), &token); err != nil {
+			return nil, false, fmt.Errorf("failed to deserialize token: %w", err)
+		}
 
-	return &token, true, nil
+		return &token, true, nil
+	case <-ctx.Done():
+		return nil, false, ctx.Err()
+	}
 }
 
 // Clear removes the token from the keyring for the given provider.
+// The context can be used to cancel the operation if the keyring service is unresponsive.
 func (s *KeyringTokenStore) Clear(ctx context.Context, providerName string) error {
 	if providerName == "" {
 		return fmt.Errorf("provider name cannot be empty")
 	}
 
-	if err := keyring.Delete(serviceName, providerName); err != nil {
-		if err == keyring.ErrNotFound {
-			return nil
-		}
-		return fmt.Errorf("keyring delete failed: %w", err)
+	// Wrap keyring call in a goroutine to support context cancellation
+	type result struct {
+		err error
 	}
+	ch := make(chan result, 1)
+	go func() {
+		ch <- result{keyring.Delete(serviceName, providerName)}
+	}()
 
-	return nil
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			if r.err == keyring.ErrNotFound {
+				return nil
+			}
+			return fmt.Errorf("keyring delete failed: %w", r.err)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Ensure KeyringTokenStore implements TokenStore
