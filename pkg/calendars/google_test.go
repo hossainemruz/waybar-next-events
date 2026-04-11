@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/emruz-hossain/waybar-next-events/pkg/types"
+	"github.com/hossainemruz/waybar-next-events/pkg/types"
 	"google.golang.org/api/calendar/v3"
 )
 
