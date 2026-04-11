@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 )
@@ -12,13 +12,27 @@ import (
 func main() {
 	ctx := context.Background()
 
+	// Load configuration from file
+	// The config file should be at $HOME/.config/waybar-next-events/config.yaml
+	loader := config.NewLoader()
+	cfg, err := loader.Load()
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Get Google calendar configuration
+	googleCfg, err := cfg.GetGoogleConfig()
+	if err != nil {
+		log.Fatalf("Failed to get google config: %v", err)
+	}
+
 	// Create authenticator with keyring storage
 	authenticator := auth.NewAuthenticator(nil) // nil uses default KeyringTokenStore
 
 	// === Google OAuth2 Example ===
 	googleProvider := providers.NewGoogle(
-		os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
-		os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET"), // Empty for public clients
+		googleCfg.ClientID,
+		googleCfg.ClientSecret, // Empty for public clients
 		[]string{"https://www.googleapis.com/auth/calendar.readonly"},
 	)
 

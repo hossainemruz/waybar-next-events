@@ -3,23 +3,14 @@ package calendars
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/pkg/types"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
-)
-
-// Environment variable names for Google OAuth credentials.
-// These should be set in your environment before running the application.
-const (
-	// GoogleOAuthClientIDEnv is the environment variable name for Google OAuth client ID.
-	GoogleOAuthClientIDEnv = "GOOGLE_OAUTH_CLIENT_ID"
-	// GoogleOAuthClientSecretEnv is the environment variable name for Google OAuth client secret.
-	GoogleOAuthClientSecretEnv = "GOOGLE_OAUTH_CLIENT_SECRET"
 )
 
 // defaultAuthenticator is a shared authenticator instance for calendar operations.
@@ -32,19 +23,23 @@ var defaultAuthenticator = auth.NewAuthenticator(nil)
 func getCalendarClient() (*calendar.Service, error) {
 	ctx := context.Background()
 
-	// Get credentials from environment
-	clientID := os.Getenv(GoogleOAuthClientIDEnv)
-	if clientID == "" {
-		return nil, fmt.Errorf("environment variable %s not set", GoogleOAuthClientIDEnv)
+	// Load configuration from file
+	loader := config.NewLoader()
+	cfg, err := loader.Load()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	clientSecret := os.Getenv(GoogleOAuthClientSecretEnv)
-	// clientSecret may be empty for public clients
+	// Get Google calendar configuration
+	googleCfg, err := cfg.GetGoogleConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get google config: %w", err)
+	}
 
 	// Create Google OAuth provider
 	googleProvider := providers.NewGoogle(
-		clientID,
-		clientSecret,
+		googleCfg.ClientID,
+		googleCfg.ClientSecret,
 		[]string{calendar.CalendarReadonlyScope},
 	)
 
