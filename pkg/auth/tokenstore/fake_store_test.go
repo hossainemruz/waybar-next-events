@@ -1,0 +1,142 @@
+package tokenstore
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"golang.org/x/oauth2"
+)
+
+func TestFakeTokenStore(t *testing.T) {
+	ctx := context.Background()
+	store := NewFakeTokenStore()
+
+	t.Run("Get_NotFound", func(t *testing.T) {
+		token, found, err := store.Get(ctx, "nonexistent")
+		if err != nil {
+			t.Errorf("Get() error = %v", err)
+		}
+		if found {
+			t.Error("Get() found = true, want false")
+		}
+		if token != nil {
+			t.Error("Get() token != nil, want nil")
+		}
+	})
+
+	t.Run("SetAndGet", func(t *testing.T) {
+		token := &oauth2.Token{
+			AccessToken:  "access-token",
+			RefreshToken: "refresh-token",
+			TokenType:    "Bearer",
+			Expiry:       time.Now().Add(time.Hour),
+		}
+
+		err := store.Set(ctx, "test-provider", token)
+		if err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+
+		retrieved, found, err := store.Get(ctx, "test-provider")
+		if err != nil {
+			t.Errorf("Get() error = %v", err)
+		}
+		if !found {
+			t.Error("Get() found = false, want true")
+		}
+		if retrieved == nil {
+			t.Fatal("Get() token = nil, want non-nil")
+		}
+		if retrieved.AccessToken != token.AccessToken {
+			t.Errorf("Get() AccessToken = %s, want %s", retrieved.AccessToken, token.AccessToken)
+		}
+		if retrieved.RefreshToken != token.RefreshToken {
+			t.Errorf("Get() RefreshToken = %s, want %s", retrieved.RefreshToken, token.RefreshToken)
+		}
+	})
+
+	t.Run("Set_UpdatesExisting", func(t *testing.T) {
+		token1 := &oauth2.Token{
+			AccessToken: "token1",
+			Expiry:      time.Now().Add(time.Hour),
+		}
+		token2 := &oauth2.Token{
+			AccessToken: "token2",
+			Expiry:      time.Now().Add(2 * time.Hour),
+		}
+
+		store.Set(ctx, "update-provider", token1)
+		store.Set(ctx, "update-provider", token2)
+
+		retrieved, found, _ := store.Get(ctx, "update-provider")
+		if !found {
+			t.Fatal("Get() found = false after update")
+		}
+		if retrieved.AccessToken != "token2" {
+			t.Errorf("Get() AccessToken = %s, want token2", retrieved.AccessToken)
+		}
+	})
+
+	t.Run("Clear_Existing", func(t *testing.T) {
+		token := &oauth2.Token{
+			AccessToken: "to-be-cleared",
+			Expiry:      time.Now().Add(time.Hour),
+		}
+
+		store.Set(ctx, "clear-provider", token)
+		err := store.Clear(ctx, "clear-provider")
+		if err != nil {
+			t.Errorf("Clear() error = %v", err)
+		}
+
+		_, found, _ := store.Get(ctx, "clear-provider")
+		if found {
+			t.Error("Get() found = true after Clear(), want false")
+		}
+	})
+
+	t.Run("Clear_NotFound", func(t *testing.T) {
+		// Clearing a non-existent token should not error
+		err := store.Clear(ctx, "never-existed")
+		if err != nil {
+			t.Errorf("Clear() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("MultipleProviders", func(t *testing.T) {
+		googleToken := &oauth2.Token{
+			AccessToken: "google-token",
+			Expiry:      time.Now().Add(time.Hour),
+		}
+		githubToken := &oauth2.Token{
+			AccessToken: "github-token",
+			Expiry:      time.Now().Add(time.Hour),
+		}
+
+		store.Set(ctx, "google", googleToken)
+		store.Set(ctx, "github", githubToken)
+
+		g, found, _ := store.Get(ctx, "google")
+		if !found || g.AccessToken != "google-token" {
+			t.Error("Google token not stored correctly")
+		}
+
+		h, found, _ := store.Get(ctx, "github")
+		if !found || h.AccessToken != "github-token" {
+			t.Error("GitHub token not stored correctly")
+		}
+
+		// Ensure they're isolated
+		store.Clear(ctx, "google")
+		_, found, _ = store.Get(ctx, "google")
+		if found {
+			t.Error("Google token still exists after clear")
+		}
+
+		h, found, _ = store.Get(ctx, "github")
+		if !found || h.AccessToken != "github-token" {
+			t.Error("GitHub token affected by Google clear")
+		}
+	})
+}

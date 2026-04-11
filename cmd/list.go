@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/emruz-hossain/waybar-next-events/pkg/calendars"
-	"github.com/emruz-hossain/waybar-next-events/pkg/types"
+	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
+	"github.com/hossainemruz/waybar-next-events/pkg/types"
 	"github.com/spf13/cobra"
 )
 

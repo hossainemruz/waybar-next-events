@@ -2,170 +2,59 @@ package calendars
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"log"
-	"net"
-	"net/http"
 	"os"
-	"os/exec"
-	"runtime"
 	"time"
 
-	"github.com/emruz-hossain/waybar-next-events/pkg/types"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
+	"github.com/hossainemruz/waybar-next-events/pkg/auth"
+	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
+	"github.com/hossainemruz/waybar-next-events/pkg/types"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
 )
 
-const (
-	tokenFile = "/home/emruz/personal/projects/waybar-next-events/token.json" // or ~/.config/yourcli/token.json
-	scope     = calendar.CalendarReadonlyScope
-)
+// GoogleCalendarClientIDEnv is the environment variable name for Google OAuth client ID.
+const GoogleCalendarClientIDEnv = "GOOGLE_CALENDAR_CLIENT_ID"
 
-// Load credentials.json
-func getConfig() (*oauth2.Config, error) {
-	b, err := os.ReadFile("/home/emruz/personal/projects/waybar-next-events/credentials.json")
-	if err != nil {
-		return nil, err
+// GoogleCalendarClientSecretEnv is the environment variable name for Google OAuth client secret.
+const GoogleCalendarClientSecretEnv = "GOOGLE_CALENDAR_CLIENT_SECRET"
+
+// getCalendarClient returns a Google Calendar service client with automatic
+// authentication and token refresh using the keyring-backed auth package.
+func getCalendarClient() (*calendar.Service, error) {
+	ctx := context.Background()
+
+	// Get credentials from environment
+	clientID := os.Getenv(GoogleCalendarClientIDEnv)
+	if clientID == "" {
+		return nil, fmt.Errorf("environment variable %s not set", GoogleCalendarClientIDEnv)
 	}
-	return google.ConfigFromJSON(b, scope)
-}
 
-// Token cache helpers (store refresh token securely)
-func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	var tok oauth2.Token
-	return &tok, json.NewDecoder(f).Decode(&tok)
-}
+	clientSecret := os.Getenv(GoogleCalendarClientSecretEnv)
+	// clientSecret may be empty for public clients
 
-func saveToken(file string, token *oauth2.Token) error {
-	f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return json.NewEncoder(f).Encode(token)
-}
-
-// Best UX: local server + auto-open browser
-func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
-	// Start listener on random loopback port
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return nil, err
-	}
-	defer listener.Close()
-	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURL := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
-
-	// Temporarily set redirect (Google accepts any 127.0.0.1:<port> for Desktop apps)
-	originalRedirect := config.RedirectURL
-	config.RedirectURL = redirectURL
-	defer func() { config.RedirectURL = originalRedirect }()
-
-	// Channel for the auth code
-	codeCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-
-	// Simple HTTP handler
-	mux := http.NewServeMux()
-	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		if code := r.URL.Query().Get("code"); code != "" {
-			codeCh <- code
-			fmt.Fprintln(w, "Authentication successful! You can close this tab.")
-		} else {
-			errCh <- fmt.Errorf("no code in callback")
-			http.Error(w, "No code", http.StatusBadRequest)
-		}
-	})
-
-	srv := &http.Server{Handler: mux}
-	go func() {
-		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-	}()
-	defer srv.Shutdown(context.Background())
-
-	// Generate auth URL (access_type=offline → refresh token)
-	authURL := config.AuthCodeURL("state-token",
-		oauth2.AccessTypeOffline,
-		oauth2.ApprovalForce, // forces consent screen on first run
+	// Create Google OAuth provider
+	googleProvider := providers.NewGoogle(
+		clientID,
+		clientSecret,
+		[]string{calendar.CalendarReadonlyScope},
 	)
 
-	fmt.Println("Opening browser for Google authentication...")
-	if err := openURL(authURL); err != nil {
-		fmt.Printf("Please open this URL manually:\n%s\n", authURL)
-	}
+	// Create authenticator with default keyring store
+	authenticator := auth.NewAuthenticator(nil)
 
-	// Wait for callback or timeout
-	select {
-	case code := <-codeCh:
-		tok, err := config.Exchange(context.Background(), code)
-		if err != nil {
-			return nil, err
-		}
-		return tok, nil
-	case err := <-errCh:
-		return nil, err
-	case <-time.After(5 * time.Minute):
-		return nil, fmt.Errorf("authentication timeout")
-	}
-}
-
-// openURL opens the specified URL in the default browser
-func openURL(url string) error {
-	var cmd string
-	var args []string
-
-	switch runtime.GOOS {
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", url}
-	case "darwin": // macOS
-		cmd = "open"
-		args = []string{url}
-	case "linux":
-		cmd = "xdg-open"
-		args = []string{url}
-	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
-	}
-
-	return exec.Command(cmd, args...).Start()
-}
-
-// Main client getter (reuse across runs)
-func getCalendarClient() (*calendar.Service, error) {
-	config, err := getConfig()
+	// Get HTTP client with automatic token refresh
+	client, err := authenticator.HTTPClient(ctx, googleProvider)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create authenticated client: %w", err)
 	}
 
-	tokFile := tokenFile
-	tok, err := tokenFromFile(tokFile)
-	if err != nil || tok.Expiry.Before(time.Now()) {
-		tok, err = getTokenFromWeb(config)
-		if err != nil {
-			return nil, err
-		}
-		if err := saveToken(tokFile, tok); err != nil {
-			log.Printf("Warning: could not save token: %v", err)
-		}
-	}
-
-	ctx := context.Background()
-	client := config.Client(ctx, tok) // auto-refreshes using refresh token
 	return calendar.NewService(ctx, option.WithHTTPClient(client))
 }
 
-func GogoleEvent() ([]types.Event, error) {
+// GoogleEvents retrieves upcoming calendar events from Google Calendar.
+// It returns events for the next 4 days.
+func GoogleEvents() ([]types.Event, error) {
 	srv, err := getCalendarClient()
 	if err != nil {
 		return nil, err
@@ -181,8 +70,9 @@ func GogoleEvent() ([]types.Event, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	// List upcoming events
-	events, err := srv.Events.List("emruz.hossain@qdrant.com").
+	events, err := srv.Events.List("primary").
 		ShowDeleted(false).
 		SingleEvents(true).
 		TimeMin(minDay.Format(time.RFC3339)).
@@ -190,11 +80,17 @@ func GogoleEvent() ([]types.Event, error) {
 		OrderBy("startTime").
 		Do()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to fetch calendar events: %w", err)
 	}
 
 	// Convert google events to types.Event
 	return convertGoogleEvents(events.Items, dayLimit, today)
+}
+
+// GogoleEvent is an alias for GoogleEvents for backward compatibility.
+// Deprecated: Use GoogleEvents() instead.
+func GogoleEvent() ([]types.Event, error) {
+	return GoogleEvents()
 }
 
 func convertGoogleEvents(gEvents []*calendar.Event, dayLimit int, today time.Time) ([]types.Event, error) {
