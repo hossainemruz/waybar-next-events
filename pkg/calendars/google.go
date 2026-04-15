@@ -3,6 +3,7 @@ package calendars
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/hossainemruz/waybar-next-events/internal/config"
@@ -18,11 +19,31 @@ import (
 // future in-memory token cache optimizations.
 var defaultAuthenticator = auth.NewAuthenticator(nil)
 
-// getCalendarClient returns a Google Calendar service client with automatic
-// authentication and token refresh using the keyring-backed auth package.
-func getCalendarClient() (*calendar.Service, error) {
+// getCalendarServiceForAccount returns a Google Calendar service client with
+// automatic authentication and token refresh for the given account.
+func getCalendarServiceForAccount(account *config.GoogleAccount) (*calendar.Service, error) {
 	ctx := context.Background()
 
+	// Create Google OAuth provider for this account
+	googleProvider := providers.NewGoogle(
+		account.ClientID,
+		account.ClientSecret,
+		[]string{calendar.CalendarReadonlyScope},
+	)
+
+	// Get HTTP client with automatic token refresh
+	client, err := defaultAuthenticator.HTTPClient(ctx, googleProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authenticated client for account %q: %w", account.Name, err)
+	}
+
+	return calendar.NewService(ctx, option.WithHTTPClient(client))
+}
+
+// GoogleEvents retrieves upcoming calendar events from all configured
+// Google accounts and their calendars. It returns events for the next 4 days,
+// sorted by start time.
+func GoogleEvents() ([]types.Event, error) {
 	// Load configuration from file
 	loader := config.NewLoader()
 	cfg, err := loader.Load()
@@ -36,30 +57,6 @@ func getCalendarClient() (*calendar.Service, error) {
 		return nil, fmt.Errorf("failed to get google config: %w", err)
 	}
 
-	// Create Google OAuth provider
-	googleProvider := providers.NewGoogle(
-		googleCfg.ClientID,
-		googleCfg.ClientSecret,
-		[]string{calendar.CalendarReadonlyScope},
-	)
-
-	// Get HTTP client with automatic token refresh
-	client, err := defaultAuthenticator.HTTPClient(ctx, googleProvider)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create authenticated client: %w", err)
-	}
-
-	return calendar.NewService(ctx, option.WithHTTPClient(client))
-}
-
-// GoogleEvents retrieves upcoming calendar events from Google Calendar.
-// It returns events for the next 4 days.
-func GoogleEvents() ([]types.Event, error) {
-	srv, err := getCalendarClient()
-	if err != nil {
-		return nil, err
-	}
-
 	dayLimit := 4
 	today := time.Now()
 	minDay, err := startOfDate(today.Format(time.DateOnly))
@@ -71,20 +68,48 @@ func GoogleEvents() ([]types.Event, error) {
 		return nil, err
 	}
 
-	// List upcoming events
-	events, err := srv.Events.List("primary").
-		ShowDeleted(false).
-		SingleEvents(true).
-		TimeMin(minDay.Format(time.RFC3339)).
-		TimeMax(maxDay.Format(time.RFC3339)).
-		OrderBy("startTime").
-		Do()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch calendar events: %w", err)
+	var allEvents []types.Event
+
+	for i := range googleCfg.Accounts {
+		account := &googleCfg.Accounts[i]
+
+		srv, err := getCalendarServiceForAccount(account)
+		if err != nil {
+			return nil, err
+		}
+
+		calendarIDs := account.CalendarIDs()
+		for _, calID := range calendarIDs {
+			events, err := srv.Events.List(calID).
+				ShowDeleted(false).
+				SingleEvents(true).
+				TimeMin(minDay.Format(time.RFC3339)).
+				TimeMax(maxDay.Format(time.RFC3339)).
+				OrderBy("startTime").
+				Do()
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch events for calendar %q from account %q: %w", calID, account.Name, err)
+			}
+
+			converted, err := convertGoogleEvents(events.Items, dayLimit, today)
+			if err != nil {
+				return nil, err
+			}
+			allEvents = append(allEvents, converted...)
+		}
 	}
 
-	// Convert google events to types.Event
-	return convertGoogleEvents(events.Items, dayLimit, today)
+	// If no events were found across all accounts and calendars, return an empty slice
+	if allEvents == nil {
+		allEvents = []types.Event{}
+	}
+
+	// Sort all events by start time across accounts and calendars
+	sort.Slice(allEvents, func(i, j int) bool {
+		return allEvents[i].Start.Before(allEvents[j].Start)
+	})
+
+	return allEvents, nil
 }
 
 func convertGoogleEvents(gEvents []*calendar.Event, dayLimit int, today time.Time) ([]types.Event, error) {

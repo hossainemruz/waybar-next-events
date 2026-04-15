@@ -36,9 +36,11 @@ func NewGoogle(clientID, clientSecret string, scopes []string) *Google {
 	}
 }
 
-// Name returns the provider name.
+// Name returns a unique identifier for the provider.
+// The clientId is used as the identity so that each Google account gets
+// its own token storage key, ensuring independent OAuth sessions per account.
 func (g *Google) Name() string {
-	return "google"
+	return g.clientID
 }
 
 // ClientID returns the OAuth2 client ID.
