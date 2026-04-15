@@ -1,19 +1,32 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestLoader_Load(t *testing.T) {
-	t.Run("ValidConfig", func(t *testing.T) {
+	t.Run("ValidSingleAccountConfig", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.json")
 		configContent := `{
 	"google": {
-		"clientId": "test-client-id",
-		"clientSecret": "test-client-secret"
+		"name": "Google Calendar",
+		"accounts": [
+			{
+				"name": "Work",
+				"clientId": "test-client-id",
+				"clientSecret": "test-client-secret",
+				"calendars": [
+					{
+						"name": "Work Calendar",
+						"id": "work@example.com"
+					}
+				]
+			}
+		]
 	}
 }`
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -31,11 +44,75 @@ func TestLoader_Load(t *testing.T) {
 			t.Fatalf("GetGoogleConfig() error = %v", err)
 		}
 
-		if googleCfg.ClientID != "test-client-id" {
-			t.Errorf("ClientID = %s, want test-client-id", googleCfg.ClientID)
+		if len(googleCfg.Accounts) != 1 {
+			t.Fatalf("Accounts length = %d, want 1", len(googleCfg.Accounts))
 		}
-		if googleCfg.ClientSecret != "test-client-secret" {
-			t.Errorf("ClientSecret = %s, want test-client-secret", googleCfg.ClientSecret)
+		if googleCfg.Accounts[0].ClientID != "test-client-id" {
+			t.Errorf("ClientID = %s, want test-client-id", googleCfg.Accounts[0].ClientID)
+		}
+		if googleCfg.Accounts[0].ClientSecret != "test-client-secret" {
+			t.Errorf("ClientSecret = %s, want test-client-secret", googleCfg.Accounts[0].ClientSecret)
+		}
+		if len(googleCfg.Accounts[0].Calendars) != 1 {
+			t.Errorf("Calendars length = %d, want 1", len(googleCfg.Accounts[0].Calendars))
+		}
+		if googleCfg.Accounts[0].Calendars[0].Name != "Work Calendar" {
+			t.Errorf("Calendar Name = %s, want Work Calendar", googleCfg.Accounts[0].Calendars[0].Name)
+		}
+		if googleCfg.Accounts[0].Calendars[0].ID != "work@example.com" {
+			t.Errorf("Calendar ID = %s, want work@example.com", googleCfg.Accounts[0].Calendars[0].ID)
+		}
+	})
+
+	t.Run("ValidMultiAccountConfig", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+		configContent := `{
+	"google": {
+		"name": "Google Calendar",
+		"accounts": [
+			{
+				"name": "Work",
+				"clientId": "work-client-id",
+				"clientSecret": "work-client-secret"
+			},
+			{
+				"name": "Personal",
+				"clientId": "personal-client-id",
+				"clientSecret": "personal-client-secret",
+				"calendars": [
+					{
+						"name": "Personal Calendar",
+						"id": "personal@gmail.com"
+					}
+				]
+			}
+		]
+	}
+}`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		loader := NewLoaderWithPath(configPath)
+		cfg, err := loader.Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		googleCfg, err := cfg.GetGoogleConfig()
+		if err != nil {
+			t.Fatalf("GetGoogleConfig() error = %v", err)
+		}
+
+		if len(googleCfg.Accounts) != 2 {
+			t.Fatalf("Accounts length = %d, want 2", len(googleCfg.Accounts))
+		}
+		if googleCfg.Accounts[0].Name != "Work" {
+			t.Errorf("Account[0] Name = %s, want Work", googleCfg.Accounts[0].Name)
+		}
+		if googleCfg.Accounts[1].Name != "Personal" {
+			t.Errorf("Account[1] Name = %s, want Personal", googleCfg.Accounts[1].Name)
 		}
 	})
 
@@ -80,8 +157,8 @@ func TestLoader_Load(t *testing.T) {
 		}
 
 		_, err = cfg.GetGoogleConfig()
-		if err == nil {
-			t.Error("GetGoogleConfig() expected error for empty config, got nil")
+		if !errors.Is(err, ErrNoGoogleCalendar) {
+			t.Errorf("GetGoogleConfig() error = %v, want ErrNoGoogleCalendar", err)
 		}
 	})
 
@@ -104,17 +181,51 @@ func TestLoader_Load(t *testing.T) {
 		}
 
 		_, err = cfg.GetGoogleConfig()
-		if err == nil {
-			t.Error("GetGoogleConfig() expected error when no google calendar, got nil")
+		if !errors.Is(err, ErrNoGoogleCalendar) {
+			t.Errorf("GetGoogleConfig() error = %v, want ErrNoGoogleCalendar", err)
 		}
 	})
 
-	t.Run("GoogleCalendarMissingClientID", func(t *testing.T) {
+	t.Run("EmptyAccounts", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.json")
 		configContent := `{
 	"google": {
-		"clientSecret": "test-secret"
+		"name": "Google Calendar",
+		"accounts": []
+	}
+}`
+		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+			t.Fatalf("Failed to write test config: %v", err)
+		}
+
+		loader := NewLoaderWithPath(configPath)
+		cfg, err := loader.Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		googleCfg, err := cfg.GetGoogleConfig()
+		if err != nil {
+			t.Fatalf("GetGoogleConfig() unexpected error: %v", err)
+		}
+		if len(googleCfg.Accounts) != 0 {
+			t.Errorf("Accounts length = %d, want 0", len(googleCfg.Accounts))
+		}
+	})
+
+	t.Run("AccountMissingClientID", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+		configContent := `{
+	"google": {
+		"name": "Google Calendar",
+		"accounts": [
+			{
+				"name": "Work",
+				"clientSecret": "test-secret"
+			}
+		]
 	}
 }`
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -128,8 +239,8 @@ func TestLoader_Load(t *testing.T) {
 		}
 
 		_, err = cfg.GetGoogleConfig()
-		if err == nil {
-			t.Error("GetGoogleConfig() expected error when clientId is missing, got nil")
+		if !errors.Is(err, ErrAccountMissingClientID) {
+			t.Errorf("GetGoogleConfig() error = %v, want ErrAccountMissingClientID", err)
 		}
 	})
 
@@ -138,7 +249,13 @@ func TestLoader_Load(t *testing.T) {
 		configPath := filepath.Join(tmpDir, "config.json")
 		configContent := `{
 	"google": {
-		"clientId": "test-client-id"
+		"name": "Google Calendar",
+		"accounts": [
+			{
+				"name": "Work",
+				"clientId": "test-client-id"
+			}
+		]
 	}
 }`
 		if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -156,12 +273,58 @@ func TestLoader_Load(t *testing.T) {
 			t.Fatalf("GetGoogleConfig() error = %v", err)
 		}
 
-		if googleCfg.ClientID != "test-client-id" {
-			t.Errorf("ClientID = %s, want test-client-id", googleCfg.ClientID)
+		if googleCfg.Accounts[0].ClientID != "test-client-id" {
+			t.Errorf("ClientID = %s, want test-client-id", googleCfg.Accounts[0].ClientID)
 		}
 		// Empty clientSecret is valid for public clients
-		if googleCfg.ClientSecret != "" {
-			t.Errorf("ClientSecret = %s, want empty", googleCfg.ClientSecret)
+		if googleCfg.Accounts[0].ClientSecret != "" {
+			t.Errorf("ClientSecret = %s, want empty", googleCfg.Accounts[0].ClientSecret)
+		}
+	})
+}
+
+func TestGoogleAccount_CalendarIDs(t *testing.T) {
+	t.Run("CalendarsConfigured", func(t *testing.T) {
+		account := GoogleAccount{
+			Name:     "Work",
+			ClientID: "test-id",
+			Calendars: []Calendar{
+				{Name: "Work Cal", ID: "work@example.com"},
+				{Name: "Holidays", ID: "holidays@group.calendar.google.com"},
+			},
+		}
+		ids := account.CalendarIDs()
+		if len(ids) != 2 {
+			t.Fatalf("CalendarIDs() length = %d, want 2", len(ids))
+		}
+		if ids[0] != "work@example.com" {
+			t.Errorf("CalendarIDs()[0] = %s, want work@example.com", ids[0])
+		}
+		if ids[1] != "holidays@group.calendar.google.com" {
+			t.Errorf("CalendarIDs()[1] = %s, want holidays@group.calendar.google.com", ids[1])
+		}
+	})
+
+	t.Run("NoCalendars", func(t *testing.T) {
+		account := GoogleAccount{
+			Name:     "Work",
+			ClientID: "test-id",
+		}
+		ids := account.CalendarIDs()
+		if len(ids) != 1 || ids[0] != "primary" {
+			t.Errorf("CalendarIDs() = %v, want [primary]", ids)
+		}
+	})
+
+	t.Run("EmptyCalendars", func(t *testing.T) {
+		account := GoogleAccount{
+			Name:      "Work",
+			ClientID:  "test-id",
+			Calendars: []Calendar{},
+		}
+		ids := account.CalendarIDs()
+		if len(ids) != 1 || ids[0] != "primary" {
+			t.Errorf("CalendarIDs() = %v, want [primary]", ids)
 		}
 	})
 }

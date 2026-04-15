@@ -15,14 +15,45 @@ const (
 )
 
 // Config represents the top-level configuration structure.
+// It is designed to be extensible: additional calendar service providers
+// (e.g., "outlook") can be added as new top-level fields.
 type Config struct {
 	Google *GoogleCalendar `json:"google"`
 }
 
-// GoogleCalendar holds Google OAuth2 configuration.
+// GoogleCalendar holds Google Calendar provider configuration,
+// including display metadata and a list of accounts.
 type GoogleCalendar struct {
-	ClientID     string `json:"clientId"`
-	ClientSecret string `json:"clientSecret"`
+	Name     string          `json:"name"`
+	Accounts []GoogleAccount `json:"accounts"`
+}
+
+// GoogleAccount represents a single Google account with its own OAuth2 credentials
+// and an optional list of calendars to fetch events from.
+type GoogleAccount struct {
+	Name         string     `json:"name"`
+	ClientID     string     `json:"clientId"`
+	ClientSecret string     `json:"clientSecret"`
+	Calendars    []Calendar `json:"calendars"`
+}
+
+// Calendar represents a single calendar within a Google account.
+type Calendar struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
+}
+
+// CalendarIDs returns the calendar IDs for this account.
+// If no calendars are configured, it defaults to ["primary"].
+func (a *GoogleAccount) CalendarIDs() []string {
+	if len(a.Calendars) == 0 {
+		return []string{"primary"}
+	}
+	ids := make([]string, len(a.Calendars))
+	for i, cal := range a.Calendars {
+		ids[i] = cal.ID
+	}
+	return ids
 }
 
 // Loader handles loading configuration from files.
@@ -75,14 +106,19 @@ func (l *Loader) Load() (*Config, error) {
 	return &cfg, nil
 }
 
-// GetGoogleConfig extracts the Google calendar configuration from the config.
-// Returns an error if no Google calendar is configured or if clientId is missing.
+// GetGoogleConfig extracts and validates the Google calendar configuration from the config.
+// Returns an error if no Google calendar is configured or if any account is missing a required clientId.
+// An empty accounts list is valid and results in a GoogleCalendar with no accounts.
 func (c *Config) GetGoogleConfig() (*GoogleCalendar, error) {
+	// Validate google section exists
 	if c.Google == nil {
-		return nil, fmt.Errorf("no google calendar configured")
+		return nil, ErrNoGoogleCalendar
 	}
-	if c.Google.ClientID == "" {
-		return nil, fmt.Errorf("google calendar configuration missing required field: clientId")
+	// Validate no account is missing clientId
+	for i, acc := range c.Google.Accounts {
+		if acc.ClientID == "" {
+			return nil, fmt.Errorf("%w: account %q (index %d)", ErrAccountMissingClientID, acc.Name, i)
+		}
 	}
 	return c.Google, nil
 }
