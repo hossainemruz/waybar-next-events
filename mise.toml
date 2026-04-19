@@ -1,0 +1,42 @@
+[tools]
+go = "1.26"
+golangci-lint = "latest"
+"go:golang.org/x/tools/cmd/goimports" = "latest"
+
+[tasks.build]
+description = "Build the binary"
+run = "go build -o bin/waybar-next-events ."
+
+[tasks.format]
+description = "Format Go source files"
+run = "goimports -w . && gofmt -w ."
+
+[tasks.lint]
+description = "Lint Go source files using golangci-lint"
+run = "golangci-lint run ./..."
+
+[tasks.test]
+description = "Run all unit tests"
+run = "go test ./..."
+
+[tasks.tidy]
+description = "Run go mod tidy"
+run = "go mod tidy"
+
+[tasks.ci]
+description = "Run all CI checks (format, lint, test)"
+depends = ["format", "lint", "test", "tidy"]
+
+[tasks.dev]
+description = "Run the project in development mode"
+run = "go run main.go"
+
+[tasks.install]
+description = "Build and install the binary to /usr/local/bin"
+depends = ["build"]
+run = "sudo cp bin/waybar-next-events /usr/local/bin/"
+
+[tasks.cmd]
+description = "Run any project command (e.g. mise run cmd list -- --limit 3)"
+usage = 'arg "[args]" var=#true'
+run = "go run main.go ${usage_args:-}"

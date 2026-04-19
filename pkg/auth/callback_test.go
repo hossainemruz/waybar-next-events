@@ -27,7 +27,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -72,7 +72,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("Wrong-state Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -83,7 +83,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Valid callback Status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -124,7 +124,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -161,7 +161,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -201,7 +201,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("Wrong-state error Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -212,7 +212,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Valid callback Status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -251,7 +251,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("No-state error Status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
@@ -262,7 +262,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("Valid callback Status = %d, want %d", resp.StatusCode, http.StatusOK)
@@ -295,7 +295,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP POST error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
@@ -316,7 +316,7 @@ func TestCallbackServer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("HTTP GET error = %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("Status = %d, want %d", resp.StatusCode, http.StatusNotFound)

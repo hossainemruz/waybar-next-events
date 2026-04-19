@@ -66,8 +66,12 @@ func TestFakeTokenStore(t *testing.T) {
 			Expiry:      time.Now().Add(2 * time.Hour),
 		}
 
-		store.Set(ctx, "update-provider", token1)
-		store.Set(ctx, "update-provider", token2)
+		if err := store.Set(ctx, "update-provider", token1); err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+		if err := store.Set(ctx, "update-provider", token2); err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
 
 		retrieved, found, _ := store.Get(ctx, "update-provider")
 		if !found {
@@ -84,7 +88,9 @@ func TestFakeTokenStore(t *testing.T) {
 			Expiry:      time.Now().Add(time.Hour),
 		}
 
-		store.Set(ctx, "clear-provider", token)
+		if err := store.Set(ctx, "clear-provider", token); err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
 		err := store.Clear(ctx, "clear-provider")
 		if err != nil {
 			t.Errorf("Clear() error = %v", err)
@@ -114,8 +120,12 @@ func TestFakeTokenStore(t *testing.T) {
 			Expiry:      time.Now().Add(time.Hour),
 		}
 
-		store.Set(ctx, "google", googleToken)
-		store.Set(ctx, "github", githubToken)
+		if err := store.Set(ctx, "google", googleToken); err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
+		if err := store.Set(ctx, "github", githubToken); err != nil {
+			t.Fatalf("Set() error = %v", err)
+		}
 
 		g, found, _ := store.Get(ctx, "google")
 		if !found || g.AccessToken != "google-token" {
@@ -128,7 +138,9 @@ func TestFakeTokenStore(t *testing.T) {
 		}
 
 		// Ensure they're isolated
-		store.Clear(ctx, "google")
+		if err := store.Clear(ctx, "google"); err != nil {
+			t.Errorf("Clear() error = %v", err)
+		}
 		_, found, _ = store.Get(ctx, "google")
 		if found {
 			t.Error("Google token still exists after clear")

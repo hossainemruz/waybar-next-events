@@ -220,9 +220,9 @@ func parseEventTime(e calendar.Event) (start time.Time, end time.Time, err error
 		if e.Start.Date == e.End.Date {
 			end, err = endOfDate(e.End.Date)
 		} else {
-			day, err := time.ParseInLocation(time.DateOnly, e.End.Date, time.Now().Location())
-			if err != nil {
-				return start, end, err
+			day, parseErr := time.ParseInLocation(time.DateOnly, e.End.Date, time.Now().Location())
+			if parseErr != nil {
+				return start, end, parseErr
 			}
 			end, err = endOfDate(day.AddDate(0, 0, -1).Format(time.DateOnly))
 		}
