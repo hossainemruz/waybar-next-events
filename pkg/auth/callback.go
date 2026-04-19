@@ -158,7 +158,7 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "<html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this tab.</p></body></html>", html.EscapeString(errCode))
+		_, _ = fmt.Fprintf(w, "<html><body><h1>Authentication Failed</h1><p>Error: %s</p><p>You can close this tab.</p></body></html>", html.EscapeString(errCode))
 		return
 	}
 
@@ -183,7 +183,7 @@ func (s *CallbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `<html>
+	_, _ = fmt.Fprint(w, `<html>
 <body>
 <h1>Authentication Successful</h1>
 <p>You have successfully authenticated. You can close this tab now.</p>

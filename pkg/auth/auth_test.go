@@ -139,7 +139,9 @@ func TestAuthenticator_ClearToken(t *testing.T) {
 		AccessToken: "token",
 		Expiry:      time.Now().Add(time.Hour),
 	}
-	store.Set(ctx, "test", token)
+	if err := store.Set(ctx, "test", token); err != nil {
+		t.Fatalf("Failed to set token: %v", err)
+	}
 
 	// Clear the token
 	err := auth.ClearToken(ctx, provider)
@@ -294,12 +296,14 @@ func TestAuthenticator_TokenRefresh(t *testing.T) {
 			// Return a new token
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{
+			if _, err := w.Write([]byte(`{
 				"access_token": "new-access-token",
 				"refresh_token": "new-refresh-token",
 				"token_type": "Bearer",
 				"expires_in": 3600
-			}`))
+			}`)); err != nil {
+				t.Logf("Failed to write response: %v", err)
+			}
 		}
 	}))
 	defer mockServer.Close()
