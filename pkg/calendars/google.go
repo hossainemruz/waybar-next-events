@@ -19,6 +19,57 @@ import (
 // future in-memory token cache optimizations.
 var defaultAuthenticator = auth.NewAuthenticator(nil)
 
+// DiscoverCalendars authenticates with the given Google account and fetches the
+// list of available calendars. It returns a slice of DiscoveredCalendar values
+// containing both the config-compatible calendar data and the Primary flag from
+// the Google Calendar API. This is the shared entry point used by both the
+// "list-calendars" command and the "account add/update" flows.
+//
+// If the account has no calendars, an empty slice is returned (which the runtime
+// defaults to ["primary"] via GoogleAccount.CalendarIDs).
+func DiscoverCalendars(ctx context.Context, account *config.GoogleAccount) ([]DiscoveredCalendar, error) {
+	googleProvider := providers.NewGoogle(
+		account.ClientID,
+		account.ClientSecret,
+		[]string{calendar.CalendarReadonlyScope},
+	)
+
+	client, err := defaultAuthenticator.HTTPClient(ctx, googleProvider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate account %q: %w", account.Name, err)
+	}
+
+	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create calendar service: %w", err)
+	}
+
+	calendarList, err := srv.CalendarList.List().Do()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list calendars: %w", err)
+	}
+
+	calendars := make([]DiscoveredCalendar, 0, len(calendarList.Items))
+	for _, item := range calendarList.Items {
+		calendars = append(calendars, DiscoveredCalendar{
+			Calendar: config.Calendar{
+				Name: item.Summary,
+				ID:   item.Id,
+			},
+			Primary: item.Primary,
+		})
+	}
+
+	return calendars, nil
+}
+
+// DiscoveredCalendar represents a calendar discovered from the Google Calendar API,
+// including the Primary flag which is useful for display but not stored in config.
+type DiscoveredCalendar struct {
+	Calendar config.Calendar
+	Primary  bool
+}
+
 // getCalendarServiceForAccount returns a Google Calendar service client with
 // automatic authentication and token refresh for the given account.
 func getCalendarServiceForAccount(account *config.GoogleAccount) (*calendar.Service, error) {

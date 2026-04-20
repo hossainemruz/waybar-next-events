@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,48 +14,6 @@ const (
 	// ConfigFileName is the name of the configuration file.
 	ConfigFileName = "config.json"
 )
-
-// Config represents the top-level configuration structure.
-// It is designed to be extensible: additional calendar service providers
-// (e.g., "outlook") can be added as new top-level fields.
-type Config struct {
-	Google *GoogleCalendar `json:"google"`
-}
-
-// GoogleCalendar holds Google Calendar provider configuration,
-// including display metadata and a list of accounts.
-type GoogleCalendar struct {
-	Name     string          `json:"name"`
-	Accounts []GoogleAccount `json:"accounts"`
-}
-
-// GoogleAccount represents a single Google account with its own OAuth2 credentials
-// and an optional list of calendars to fetch events from.
-type GoogleAccount struct {
-	Name         string     `json:"name"`
-	ClientID     string     `json:"clientId"`
-	ClientSecret string     `json:"clientSecret"`
-	Calendars    []Calendar `json:"calendars"`
-}
-
-// Calendar represents a single calendar within a Google account.
-type Calendar struct {
-	Name string `json:"name"`
-	ID   string `json:"id"`
-}
-
-// CalendarIDs returns the calendar IDs for this account.
-// If no calendars are configured, it defaults to ["primary"].
-func (a *GoogleAccount) CalendarIDs() []string {
-	if len(a.Calendars) == 0 {
-		return []string{"primary"}
-	}
-	ids := make([]string, len(a.Calendars))
-	for i, cal := range a.Calendars {
-		ids[i] = cal.ID
-	}
-	return ids
-}
 
 // Loader handles loading configuration from files.
 type Loader struct {
@@ -93,7 +52,7 @@ func (l *Loader) Load() (*Config, error) {
 	data, err := os.ReadFile(l.configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("config file not found at %s: %w", l.configPath, err)
+			return nil, &ErrConfigNotFound{Path: l.configPath}
 		}
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -104,6 +63,62 @@ func (l *Loader) Load() (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// LoadOrEmpty loads the configuration file, or returns an empty Config if the
+// file does not exist. This is useful for commands like "account add" that
+// need to work on first run when no config file exists yet.
+// Returns an error only if the file exists but contains malformed JSON.
+func (l *Loader) LoadOrEmpty() (*Config, error) {
+	cfg, err := l.Load()
+	if err != nil {
+		// If the file simply doesn't exist, return an empty config (first run).
+		var notFound *ErrConfigNotFound
+		if errors.As(err, &notFound) {
+			return &Config{}, nil
+		}
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// Save marshals the Config to JSON and writes it to the configured file path.
+// It creates the parent directory if it does not exist.
+// The JSON is written with indentation for readability.
+// Returns ErrNilConfig if cfg is nil.
+// Normalizes a nil cfg.Google to a valid empty GoogleCalendar section so that
+// first-run flows persist a well-formed config instead of {"google":null}.
+func (l *Loader) Save(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("cannot save nil config")
+	}
+
+	// Normalize nil Google section to a valid empty state so that first-run
+	// account flows persist a well-formed config (google.accounts: []) instead
+	// of null, which would cause GetGoogleConfig() to fail later.
+	if cfg.Google == nil {
+		cfg.Google = &GoogleCalendar{
+			Name:     "Google Calendar",
+			Accounts: []GoogleAccount{},
+		}
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Ensure the parent directory exists.
+	dir := filepath.Dir(l.configPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
+	}
+
+	if err := os.WriteFile(l.configPath, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
 }
 
 // GetGoogleConfig extracts and validates the Google calendar configuration from the config.

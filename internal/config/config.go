@@ -12,3 +12,10 @@ const (
 	// contract between provider validation and the callback server implementation.
 	DefaultCallbackURL = "http://127.0.0.1:" + DefaultCallbackPort + "/callback"
 )
+
+// Config represents the top-level configuration structure.
+// It is designed to be extensible: additional calendar service providers
+// (e.g., "outlook") can be added as new top-level fields.
+type Config struct {
+	Google *GoogleCalendar `json:"google"`
+}
