@@ -6,11 +6,8 @@ import (
 	"os"
 
 	"github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
+	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
-	"google.golang.org/api/calendar/v3"
-	"google.golang.org/api/option"
 )
 
 var accountName string
@@ -39,13 +36,7 @@ var listCalendarsCmd = &cobra.Command{
 		}
 
 		// Find the target account
-		var account *config.GoogleAccount
-		for i := range googleCfg.Accounts {
-			if googleCfg.Accounts[i].Name == accountName {
-				account = &googleCfg.Accounts[i]
-				break
-			}
-		}
+		account := googleCfg.FindAccountByName(accountName)
 
 		if account == nil {
 			if accountName == "" && len(googleCfg.Accounts) == 1 {
@@ -59,30 +50,10 @@ var listCalendarsCmd = &cobra.Command{
 			}
 		}
 
-		// Create Google OAuth provider for the selected account
-		googleProvider := providers.NewGoogle(
-			account.ClientID,
-			account.ClientSecret,
-			[]string{calendar.CalendarReadonlyScope},
-		)
-
-		// Get authenticated HTTP client
-		authenticator := auth.NewAuthenticator(nil)
-		client, err := authenticator.HTTPClient(ctx, googleProvider)
+		// Use the shared DiscoverCalendars helper to fetch calendars
+		discovered, err := calendars.DiscoverCalendars(ctx, account)
 		if err != nil {
-			return fmt.Errorf("failed to authenticate account %q: %w", account.Name, err)
-		}
-
-		// Create calendar service
-		srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
-		if err != nil {
-			return fmt.Errorf("failed to create calendar service: %w", err)
-		}
-
-		// List all calendars
-		calendarList, err := srv.CalendarList.List().Do()
-		if err != nil {
-			return fmt.Errorf("failed to list calendars: %w", err)
+			return fmt.Errorf("failed to discover calendars for account %q: %w", account.Name, err)
 		}
 
 		// Print results
@@ -91,22 +62,22 @@ var listCalendarsCmd = &cobra.Command{
 		fmt.Printf("%-40s | %-50s | %s\n", "Calendar Name", "Calendar ID", "Type")
 		fmt.Println("--------------------------------------------------------------------------------")
 
-		for _, item := range calendarList.Items {
+		for _, cal := range discovered {
 			calendarType := "Secondary"
-			if item.Primary {
+			if cal.Primary {
 				calendarType = "Primary"
 			}
 
 			// Truncate long names for display
-			name := item.Summary
+			name := cal.Calendar.Name
 			if len(name) > 38 {
 				name = name[:35] + "..."
 			}
 
-			fmt.Printf("%-40s | %-50s | %s\n", name, item.Id, calendarType)
+			fmt.Printf("%-40s | %-50s | %s\n", name, cal.Calendar.ID, calendarType)
 		}
 		fmt.Println("================================================================================")
-		fmt.Printf("\nTotal calendars: %d\n\n", len(calendarList.Items))
+		fmt.Printf("\nTotal calendars: %d\n\n", len(discovered))
 
 		fmt.Println("To use a specific calendar, add it to your config.json under the account's calendars array:")
 		fmt.Println(`  { "name": "Calendar Name", "id": "CALENDAR_ID_HERE" }`)
