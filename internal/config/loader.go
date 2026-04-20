@@ -85,7 +85,24 @@ func (l *Loader) LoadOrEmpty() (*Config, error) {
 // Save marshals the Config to JSON and writes it to the configured file path.
 // It creates the parent directory if it does not exist.
 // The JSON is written with indentation for readability.
+// Returns ErrNilConfig if cfg is nil.
+// Normalizes a nil cfg.Google to a valid empty GoogleCalendar section so that
+// first-run flows persist a well-formed config instead of {"google":null}.
 func (l *Loader) Save(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("cannot save nil config")
+	}
+
+	// Normalize nil Google section to a valid empty state so that first-run
+	// account flows persist a well-formed config (google.accounts: []) instead
+	// of null, which would cause GetGoogleConfig() to fail later.
+	if cfg.Google == nil {
+		cfg.Google = &GoogleCalendar{
+			Name:     "Google Calendar",
+			Accounts: []GoogleAccount{},
+		}
+	}
+
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)

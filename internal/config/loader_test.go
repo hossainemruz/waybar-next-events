@@ -478,6 +478,51 @@ func TestLoader_Save(t *testing.T) {
 			t.Errorf("Name = %s, want New Name", got.Name)
 		}
 	})
+
+	t.Run("RejectsNilConfig", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+		loader := NewLoaderWithPath(configPath)
+
+		err := loader.Save(nil)
+		if err == nil {
+			t.Fatal("Save(nil) expected error, got nil")
+		}
+
+		// File should not have been created
+		if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+			t.Error("Save(nil) should not create a file")
+		}
+	})
+
+	t.Run("NormalizesNilGoogleSection", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+		loader := NewLoaderWithPath(configPath)
+
+		cfg := &Config{Google: nil}
+
+		if err := loader.Save(cfg); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		loaded, err := loader.Load()
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		got, err := loaded.GetGoogleConfig()
+		if err != nil {
+			t.Fatalf("GetGoogleConfig() unexpected error: %v", err)
+		}
+
+		if got.Name != "Google Calendar" {
+			t.Errorf("Google.Name = %s, want Google Calendar", got.Name)
+		}
+		if len(got.Accounts) != 0 {
+			t.Errorf("Accounts length = %d, want 0", len(got.Accounts))
+		}
+	})
 }
 
 func TestLoader_LoadOrEmpty(t *testing.T) {
