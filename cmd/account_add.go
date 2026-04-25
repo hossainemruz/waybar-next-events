@@ -188,24 +188,7 @@ func (p *huhAccountAddPrompter) PromptCalendarSelection(ctx context.Context, acc
 		return nil, err
 	}
 
-	selected := make(map[string]struct{}, len(selectedCalendarIDs))
-	for _, id := range selectedCalendarIDs {
-		selected[id] = struct{}{}
-	}
-
-	calendars := make([]appconfig.Calendar, 0, len(selectedCalendarIDs))
-	for _, calendar := range discovered {
-		if _, ok := selected[calendar.Calendar.ID]; !ok {
-			continue
-		}
-		calendars = append(calendars, calendar.Calendar)
-	}
-
-	if len(calendars) == 0 {
-		return []appconfig.Calendar{}, nil
-	}
-
-	return calendars, nil
+	return selectedCalendars(discovered, selectedCalendarIDs), nil
 }
 
 func (p *huhAccountAddPrompter) ShowNoCalendarsFound(ctx context.Context, accountName string) error {
@@ -271,6 +254,7 @@ func validateNewAccountName(googleCfg *appconfig.GoogleCalendar, value string) e
 
 	return nil
 }
+
 func calendarSelectionOptions(discovered []calendars.DiscoveredCalendar) []huh.Option[string] {
 	options := make([]huh.Option[string], 0, len(discovered))
 	for _, discoveredCalendar := range discovered {

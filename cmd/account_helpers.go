@@ -6,6 +6,7 @@ import (
 
 	"charm.land/huh/v2"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
+	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 )
 
 const noAccountsConfiguredHint = "add an account first"
@@ -140,4 +141,25 @@ func requiredInput(fieldName string) func(string) error {
 		}
 		return nil
 	}
+}
+
+func selectedCalendars(discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) []appconfig.Calendar {
+	selected := make(map[string]struct{}, len(selectedCalendarIDs))
+	for _, id := range selectedCalendarIDs {
+		selected[id] = struct{}{}
+	}
+
+	selectedCalendars := make([]appconfig.Calendar, 0, len(selectedCalendarIDs))
+	for _, discoveredCalendar := range discovered {
+		if _, ok := selected[discoveredCalendar.Calendar.ID]; !ok {
+			continue
+		}
+		selectedCalendars = append(selectedCalendars, discoveredCalendar.Calendar)
+	}
+
+	if len(selectedCalendars) == 0 {
+		return []appconfig.Calendar{}
+	}
+
+	return selectedCalendars
 }
