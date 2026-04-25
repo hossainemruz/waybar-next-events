@@ -132,3 +132,12 @@ func accountSelectionLabel(account appconfig.GoogleAccount, index int) string {
 
 	return fmt.Sprintf("Account %d", index+1)
 }
+
+func requiredInput(fieldName string) func(string) error {
+	return func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required", fieldName)
+		}
+		return nil
+	}
+}

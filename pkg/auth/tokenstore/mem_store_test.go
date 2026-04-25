@@ -8,9 +8,9 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func TestFakeTokenStore(t *testing.T) {
+func TestInMemoryTokenStore(t *testing.T) {
 	ctx := context.Background()
-	store := NewFakeTokenStore()
+	store := NewInMemoryTokenStore()
 
 	t.Run("Get_NotFound", func(t *testing.T) {
 		token, found, err := store.Get(ctx, "nonexistent")
