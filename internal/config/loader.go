@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +14,22 @@ const (
 	ConfigDirName = "waybar-next-events"
 	// ConfigFileName is the name of the configuration file.
 	ConfigFileName = "config.json"
+	// configDirPermission is the permission used for config directories.
+	configDirPermission = 0o755
+	// configFilePermission is the permission used for config files.
+	configFilePermission = 0o644
 )
 
 // Loader handles loading configuration from files.
 type Loader struct {
 	configPath string
+}
+
+// Snapshot captures the current on-disk state of a config file so it can be
+// restored later.
+type Snapshot struct {
+	exists bool
+	data   []byte
 }
 
 // NewLoader creates a new config loader that reads from the default path.
@@ -110,12 +122,47 @@ func (l *Loader) Save(cfg *Config) error {
 
 	// Ensure the parent directory exists.
 	dir := filepath.Dir(l.configPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, configDirPermission); err != nil {
 		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(l.configPath, data, 0o644); err != nil {
+	if err := os.WriteFile(l.configPath, data, configFilePermission); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// Snapshot returns the current config file contents.
+// If the config file does not exist yet, it returns an empty snapshot.
+func (l *Loader) Snapshot() (Snapshot, error) {
+	data, err := os.ReadFile(l.configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Snapshot{}, nil
+		}
+		return Snapshot{}, fmt.Errorf("failed to read config snapshot: %w", err)
+	}
+
+	return Snapshot{exists: true, data: bytes.Clone(data)}, nil
+}
+
+// RestoreSnapshot restores a snapshot previously returned by Snapshot.
+func (l *Loader) RestoreSnapshot(snapshot Snapshot) error {
+	if !snapshot.exists {
+		if err := os.Remove(l.configPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove config file: %w", err)
+		}
+		return nil
+	}
+
+	dir := filepath.Dir(l.configPath)
+	if err := os.MkdirAll(dir, configDirPermission); err != nil {
+		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
+	}
+
+	if err := os.WriteFile(l.configPath, snapshot.data, configFilePermission); err != nil {
+		return fmt.Errorf("failed to restore config file: %w", err)
 	}
 
 	return nil

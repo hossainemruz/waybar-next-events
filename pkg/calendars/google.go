@@ -28,13 +28,21 @@ var defaultAuthenticator = auth.NewAuthenticator(nil)
 // If the account has no calendars, an empty slice is returned (which the runtime
 // defaults to ["primary"] via GoogleAccount.CalendarIDs).
 func DiscoverCalendars(ctx context.Context, account *config.GoogleAccount) ([]DiscoveredCalendar, error) {
+	return DiscoverCalendarsWithAuthenticator(ctx, account, defaultAuthenticator)
+}
+
+// DiscoverCalendarsWithAuthenticator authenticates with the given Google
+// account using the provided authenticator and fetches the list of available
+// calendars. This lets interactive account-management flows stage tokens until
+// the full flow succeeds while still reusing the shared discovery path.
+func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.GoogleAccount, authenticator *auth.Authenticator) ([]DiscoveredCalendar, error) {
 	googleProvider := providers.NewGoogle(
 		account.ClientID,
 		account.ClientSecret,
 		[]string{calendar.CalendarReadonlyScope},
 	)
 
-	client, err := defaultAuthenticator.HTTPClient(ctx, googleProvider)
+	client, err := authenticator.HTTPClient(ctx, googleProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to authenticate account %q: %w", account.Name, err)
 	}

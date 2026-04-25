@@ -43,7 +43,7 @@ func (m *mockProvider) ExchangeOptions() []oauth2.AuthCodeOption {
 var _ providers.Provider = (*mockProvider)(nil)
 
 func TestAuthenticator_ValidToken(t *testing.T) {
-	store := tokenstore.NewFakeTokenStore()
+	store := tokenstore.NewInMemoryTokenStore()
 	auth := NewAuthenticator(store)
 
 	// Create a valid token
@@ -81,7 +81,7 @@ func TestAuthenticator_ValidToken(t *testing.T) {
 }
 
 func TestAuthenticator_ExpiredTokenNoRefresh(t *testing.T) {
-	store := tokenstore.NewFakeTokenStore()
+	store := tokenstore.NewInMemoryTokenStore()
 	auth := NewAuthenticator(store)
 
 	// Create an expired token without refresh token
@@ -121,7 +121,7 @@ func TestAuthenticator_ExpiredTokenNoRefresh(t *testing.T) {
 }
 
 func TestAuthenticator_ClearToken(t *testing.T) {
-	store := tokenstore.NewFakeTokenStore()
+	store := tokenstore.NewInMemoryTokenStore()
 	auth := NewAuthenticator(store)
 
 	provider := &mockProvider{
@@ -157,7 +157,7 @@ func TestAuthenticator_ClearToken(t *testing.T) {
 }
 
 func TestAuthenticator_InvalidProvider(t *testing.T) {
-	store := tokenstore.NewFakeTokenStore()
+	store := tokenstore.NewInMemoryTokenStore()
 	auth := NewAuthenticator(store)
 
 	invalidProvider := &mockProvider{
@@ -173,7 +173,7 @@ func TestAuthenticator_InvalidProvider(t *testing.T) {
 }
 
 func TestPersistingTokenSource(t *testing.T) {
-	store := tokenstore.NewFakeTokenStore()
+	store := tokenstore.NewInMemoryTokenStore()
 
 	// Create a mock token source that returns a refreshed token
 	refreshedToken := &oauth2.Token{
@@ -308,7 +308,7 @@ func TestAuthenticator_TokenRefresh(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	store := tokenstore.NewFakeTokenStore()
+	store := tokenstore.NewInMemoryTokenStore()
 	auth := NewAuthenticator(store)
 
 	// Create an expired token with a refresh token
