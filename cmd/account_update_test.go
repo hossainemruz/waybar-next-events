@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/huh/v2"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 
@@ -45,13 +46,13 @@ func TestRunAccountUpdateUpdatesSelectedAccountAndPersistsCalendars(t *testing.T
 
 	loader := appconfig.NewLoaderWithPath(configPath)
 	prompter := &stubAccountUpdatePrompter{
-		selectedAccountName: "Work",
+		selectedAccountName: "Personal",
 		updatedInput: accountUpdateInput{
-			Name:         "Work Updated",
-			ClientID:     "work-client",
-			ClientSecret: "work-secret",
+			Name:         "Personal Updated",
+			ClientID:     "personal-client",
+			ClientSecret: "personal-secret",
 		},
-		selectedCalendars: []appconfig.Calendar{{Name: "Team", ID: "team-id"}},
+		selectedCalendars: []appconfig.Calendar{{Name: "Travel", ID: "travel-id"}},
 	}
 
 	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
@@ -73,11 +74,11 @@ func TestRunAccountUpdateUpdatesSelectedAccountAndPersistsCalendars(t *testing.T
 		t.Fatalf("runAccountUpdate() error = %v", err)
 	}
 
-	if prompter.detailsInput.Name != "Work" || prompter.detailsInput.ClientID != "work-client" || prompter.detailsInput.ClientSecret != "work-secret" {
+	if prompter.detailsInput.Name != "Personal" || prompter.detailsInput.ClientID != "personal-client" || prompter.detailsInput.ClientSecret != "personal-secret" {
 		t.Fatalf("details input = %+v, want original account values", prompter.detailsInput)
 	}
-	if len(prompter.preselectedCalendarIDs) != 2 || prompter.preselectedCalendarIDs[0] != "primary-id" || prompter.preselectedCalendarIDs[1] != "team-id" {
-		t.Fatalf("preselected calendar IDs = %v, want [primary-id team-id]", prompter.preselectedCalendarIDs)
+	if len(prompter.preselectedCalendarIDs) != 1 || prompter.preselectedCalendarIDs[0] != "home-id" {
+		t.Fatalf("preselected calendar IDs = %v, want [home-id]", prompter.preselectedCalendarIDs)
 	}
 
 	loaded, err := loader.Load()
@@ -94,20 +95,20 @@ func TestRunAccountUpdateUpdatesSelectedAccountAndPersistsCalendars(t *testing.T
 		t.Fatalf("accounts length = %d, want 2", len(googleCfg.Accounts))
 	}
 
-	updated := googleCfg.Accounts[0]
-	if updated.Name != "Work Updated" {
-		t.Fatalf("updated.Name = %q, want %q", updated.Name, "Work Updated")
-	}
-	if updated.ClientID != "work-client" || updated.ClientSecret != "work-secret" {
-		t.Fatalf("updated credentials = (%q, %q), want (%q, %q)", updated.ClientID, updated.ClientSecret, "work-client", "work-secret")
-	}
-	if len(updated.Calendars) != 1 || updated.Calendars[0].ID != "team-id" {
-		t.Fatalf("updated calendars = %+v, want only team-id", updated.Calendars)
+	unchanged := googleCfg.Accounts[0]
+	if unchanged.Name != "Work" || unchanged.ClientID != "work-client" || unchanged.ClientSecret != "work-secret" {
+		t.Fatalf("unchanged account = %+v, want original work account", unchanged)
 	}
 
-	unchanged := googleCfg.Accounts[1]
-	if unchanged.Name != "Personal" || unchanged.ClientID != "personal-client" || unchanged.ClientSecret != "personal-secret" {
-		t.Fatalf("unchanged account = %+v, want original personal account", unchanged)
+	updated := googleCfg.Accounts[1]
+	if updated.Name != "Personal Updated" {
+		t.Fatalf("updated.Name = %q, want %q", updated.Name, "Personal Updated")
+	}
+	if updated.ClientID != "personal-client" || updated.ClientSecret != "personal-secret" {
+		t.Fatalf("updated credentials = (%q, %q), want (%q, %q)", updated.ClientID, updated.ClientSecret, "personal-client", "personal-secret")
+	}
+	if len(updated.Calendars) != 1 || updated.Calendars[0].ID != "travel-id" {
+		t.Fatalf("updated calendars = %+v, want only travel-id", updated.Calendars)
 	}
 }
 
@@ -238,6 +239,173 @@ func TestRunAccountUpdateRollsBackOnOAuthFailure(t *testing.T) {
 	}
 }
 
+func TestRunAccountUpdateRollsBackConfigWhenTokenCommitFails(t *testing.T) {
+	configPath := writeTestConfigFile(t, `{
+		"google": {
+			"name": "Google Calendar",
+			"accounts": [
+				{
+					"name": "Work",
+					"clientId": "old-client",
+					"clientSecret": "old-secret",
+					"calendars": [
+						{"name": "Primary", "id": "primary-id"}
+					]
+				}
+			]
+		}
+	}`)
+	original := readFile(t, configPath)
+
+	loader := appconfig.NewLoaderWithPath(configPath)
+	prompter := &stubAccountUpdatePrompter{
+		selectedAccountName: "Work",
+		updatedInput: accountUpdateInput{
+			Name:         "Work Updated",
+			ClientID:     "new-client",
+			ClientSecret: "new-secret",
+		},
+		selectedCalendars: []appconfig.Calendar{{Name: "Primary", ID: "primary-id"}},
+	}
+	backingStore := &failingTokenStore{clearErr: errors.New("keyring unavailable")}
+
+	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+		newLoader:     func() *appconfig.Loader { return loader },
+		newPrompter:   func(*cobra.Command) accountUpdatePrompter { return prompter },
+		newTokenStore: func() tokenstore.TokenStore { return backingStore },
+		clearToken:    clearGoogleAccountToken,
+		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{{
+				Calendar: appconfig.Calendar{Name: "Primary", ID: "primary-id"},
+				Primary:  true,
+			}}, nil
+		},
+	})
+	if err == nil {
+		t.Fatal("runAccountUpdate() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "failed to persist OAuth token") {
+		t.Fatalf("error = %q, want token persistence error", err.Error())
+	}
+
+	assertConfigUnchanged(t, configPath, original)
+}
+
+func TestRunAccountUpdatePreservesConfigOnUserAbort(t *testing.T) {
+	tests := []struct {
+		name         string
+		selectionErr error
+		detailsErr   error
+	}{
+		{name: "selection user aborted", selectionErr: huh.ErrUserAborted},
+		{name: "selection context canceled", selectionErr: context.Canceled},
+		{name: "details user aborted", detailsErr: huh.ErrUserAborted},
+		{name: "details context canceled", detailsErr: context.Canceled},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := writeTestConfigFile(t, `{
+				"google": {
+					"name": "Google Calendar",
+					"accounts": [
+						{
+							"name": "Work",
+							"clientId": "work-client",
+							"clientSecret": "work-secret",
+							"calendars": [
+								{"name": "Primary", "id": "primary-id"}
+							]
+						}
+					]
+				}
+			}`)
+			original := readFile(t, configPath)
+
+			loader := appconfig.NewLoaderWithPath(configPath)
+			prompter := &stubAccountUpdatePrompter{
+				selectedAccountName: "Work",
+				selectionErr:        tt.selectionErr,
+				updatedInput: accountUpdateInput{
+					Name:         "Work Updated",
+					ClientID:     "work-client",
+					ClientSecret: "work-secret",
+				},
+				detailsErr: tt.detailsErr,
+			}
+
+			err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+				newLoader:     func() *appconfig.Loader { return loader },
+				newPrompter:   func(*cobra.Command) accountUpdatePrompter { return prompter },
+				newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+				clearToken: func(context.Context, *auth.Authenticator, *appconfig.GoogleAccount) error {
+					t.Fatal("clearToken should not be called on early user abort")
+					return nil
+				},
+				discoverCalendars: func(context.Context, *appconfig.GoogleAccount, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+					t.Fatal("discoverCalendars should not be called on early user abort")
+					return nil, nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("runAccountUpdate() error = %v, want nil", err)
+			}
+
+			assertConfigUnchanged(t, configPath, original)
+		})
+	}
+}
+
+func TestRunAccountUpdatePreservesConfigWhenNoCalendarsPromptIsAborted(t *testing.T) {
+	configPath := writeTestConfigFile(t, `{
+		"google": {
+			"name": "Google Calendar",
+			"accounts": [
+				{
+					"name": "Work",
+					"clientId": "work-client",
+					"clientSecret": "work-secret",
+					"calendars": [
+						{"name": "Primary", "id": "primary-id"}
+					]
+				}
+			]
+		}
+	}`)
+	original := readFile(t, configPath)
+
+	loader := appconfig.NewLoaderWithPath(configPath)
+	prompter := &stubAccountUpdatePrompter{
+		selectedAccountName: "Work",
+		updatedInput: accountUpdateInput{
+			Name:         "Work",
+			ClientID:     "work-client",
+			ClientSecret: "work-secret",
+		},
+		showNoCalendarsErr: huh.ErrUserAborted,
+	}
+
+	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+		newLoader:     func() *appconfig.Loader { return loader },
+		newPrompter:   func(*cobra.Command) accountUpdatePrompter { return prompter },
+		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+		clearToken: func(context.Context, *auth.Authenticator, *appconfig.GoogleAccount) error {
+			return nil
+		},
+		discoverCalendars: func(context.Context, *appconfig.GoogleAccount, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountUpdate() error = %v, want nil", err)
+	}
+
+	assertConfigUnchanged(t, configPath, original)
+	if !prompter.noCalendarsShown {
+		t.Fatal("expected no-calendars notice to be shown")
+	}
+}
+
 func TestRunAccountUpdateReturnsNoAccountsErrorWhenConfigMissing(t *testing.T) {
 	loader := appconfig.NewLoaderWithPath(filepath.Join(t.TempDir(), "missing-config.json"))
 
@@ -317,6 +485,36 @@ func TestUpdateAccountFormRejectsDuplicateRenameButAllowsCurrentName(t *testing.
 
 	if err := validateUpdatedAccountName(googleCfg, "Work", "Work"); err != nil {
 		t.Fatalf("validateUpdatedAccountName() error = %v, want nil for unchanged name", err)
+	}
+}
+
+func TestCloneCalendarsReturnsEmptySliceForNoCalendars(t *testing.T) {
+	cloned := cloneCalendars(nil)
+	if cloned == nil {
+		t.Fatal("cloneCalendars(nil) = nil, want empty slice")
+	}
+	if len(cloned) != 0 {
+		t.Fatalf("len(cloneCalendars(nil)) = %d, want 0", len(cloned))
+	}
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", path, err)
+	}
+
+	return data
+}
+
+func assertConfigUnchanged(t *testing.T, configPath string, original []byte) {
+	t.Helper()
+
+	after := readFile(t, configPath)
+	if string(after) != string(original) {
+		t.Fatalf("config changed unexpectedly\n got: %s\nwant: %s", string(after), string(original))
 	}
 }
 

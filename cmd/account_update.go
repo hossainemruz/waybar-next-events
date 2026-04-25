@@ -293,7 +293,7 @@ func currentCalendarIDs(account appconfig.GoogleAccount) []string {
 
 func cloneCalendars(calendars []appconfig.Calendar) []appconfig.Calendar {
 	if len(calendars) == 0 {
-		return nil
+		return []appconfig.Calendar{}
 	}
 
 	cloned := make([]appconfig.Calendar, len(calendars))
