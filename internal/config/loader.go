@@ -16,8 +16,8 @@ const (
 	ConfigFileName = "config.json"
 	// configDirPermission is the permission used for config directories.
 	configDirPermission = 0o755
-	// configFilePermission is the permission used for config files.
-	configFilePermission = 0o644
+	// ConfigFilePermission is the permission used for config files.
+	ConfigFilePermission = 0o644
 )
 
 // Loader handles loading configuration from files.
@@ -126,7 +126,7 @@ func (l *Loader) Save(cfg *Config) error {
 		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(l.configPath, data, configFilePermission); err != nil {
+	if err := os.WriteFile(l.configPath, data, ConfigFilePermission); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -161,7 +161,7 @@ func (l *Loader) RestoreSnapshot(snapshot Snapshot) error {
 		return fmt.Errorf("failed to create config directory %s: %w", dir, err)
 	}
 
-	if err := os.WriteFile(l.configPath, snapshot.data, configFilePermission); err != nil {
+	if err := os.WriteFile(l.configPath, snapshot.data, ConfigFilePermission); err != nil {
 		return fmt.Errorf("failed to restore config file: %w", err)
 	}
 
