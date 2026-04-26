@@ -3,8 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -153,6 +155,134 @@ func TestAuthenticator_ClearToken(t *testing.T) {
 	_, found, _ := store.Get(ctx, "test")
 	if found {
 		t.Error("Token still exists after ClearToken")
+	}
+}
+
+func TestAuthenticator_ForceAuthenticatePreservesExistingTokenOnFailure(t *testing.T) {
+	store := tokenstore.NewInMemoryTokenStore()
+	auth := NewAuthenticator(store, WithBrowserOpener(func(string) error {
+		return errors.New("browser unavailable")
+	}))
+
+	provider := &mockProvider{
+		name:        "test",
+		clientID:    "client-id",
+		authURL:     "https://example.com/auth",
+		tokenURL:    "https://example.com/token",
+		redirectURL: config.DefaultCallbackURL,
+		scopes:      []string{"read"},
+	}
+
+	expiredToken := &oauth2.Token{
+		AccessToken:  "expired-access-token",
+		RefreshToken: "refresh-token",
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(-time.Hour),
+	}
+
+	ctx := context.Background()
+	if err := store.Set(ctx, provider.Name(), expiredToken); err != nil {
+		t.Fatalf("store.Set() error = %v", err)
+	}
+
+	_, err := auth.ForceAuthenticate(ctx, provider)
+	if err == nil {
+		t.Fatal("ForceAuthenticate() error = nil, want error")
+	}
+	if !errors.Is(err, ErrBrowserOpenFailed) {
+		t.Fatalf("ForceAuthenticate() error = %v, want ErrBrowserOpenFailed", err)
+	}
+
+	stored, found, err := store.Get(ctx, provider.Name())
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !found {
+		t.Fatal("stored token missing after failed forced auth")
+	}
+	if !tokensEqual(stored, expiredToken) {
+		t.Fatalf("stored token = %+v, want original token %+v", stored, expiredToken)
+	}
+}
+
+func TestAuthenticator_ForceAuthenticateReplacesExistingTokenOnSuccess(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"access_token": "new-access-token",
+			"refresh_token": "new-refresh-token",
+			"token_type": "Bearer",
+			"expires_in": 3600
+		}`))
+	}))
+	defer tokenServer.Close()
+
+	store := tokenstore.NewInMemoryTokenStore()
+	provider := &mockProvider{
+		name:         "test",
+		clientID:     "client-id",
+		clientSecret: "client-secret",
+		authURL:      "https://example.com/auth",
+		tokenURL:     tokenServer.URL + "/token",
+		redirectURL:  config.DefaultCallbackURL,
+		scopes:       []string{"read"},
+	}
+
+	ctx := context.Background()
+	if err := store.Set(ctx, provider.Name(), &oauth2.Token{
+		AccessToken:  "old-access-token",
+		RefreshToken: "old-refresh-token",
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("store.Set() error = %v", err)
+	}
+
+	auth := NewAuthenticator(store, WithBrowserOpener(func(authURL string) error {
+		parsedURL, err := url.Parse(authURL)
+		if err != nil {
+			return err
+		}
+
+		state := parsedURL.Query().Get("state")
+		if state == "" {
+			return fmt.Errorf("missing state in auth URL")
+		}
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			resp, err := http.Get(fmt.Sprintf("%s?code=auth-code&state=%s", config.DefaultCallbackURL, url.QueryEscape(state)))
+			if err != nil {
+				return
+			}
+			_ = resp.Body.Close()
+		}()
+		return nil
+	}))
+
+	token, err := auth.ForceAuthenticate(ctx, provider)
+	if err != nil {
+		t.Fatalf("ForceAuthenticate() error = %v", err)
+	}
+	if token.AccessToken != "new-access-token" {
+		t.Fatalf("token.AccessToken = %q, want %q", token.AccessToken, "new-access-token")
+	}
+
+	stored, found, err := store.Get(ctx, provider.Name())
+	if err != nil {
+		t.Fatalf("store.Get() error = %v", err)
+	}
+	if !found {
+		t.Fatal("stored token missing after successful forced auth")
+	}
+	if stored.AccessToken != "new-access-token" {
+		t.Fatalf("stored.AccessToken = %q, want %q", stored.AccessToken, "new-access-token")
 	}
 }
 

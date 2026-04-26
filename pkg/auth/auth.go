@@ -142,6 +142,19 @@ func (a *Authenticator) Authenticate(ctx context.Context, provider providers.Pro
 	return a.performOAuthFlow(ctx, provider)
 }
 
+// ForceAuthenticate always starts a new browser-based OAuth2 flow for the
+// provider without consulting or modifying any previously stored token unless
+// the new flow succeeds and stores a replacement token.
+func (a *Authenticator) ForceAuthenticate(ctx context.Context, provider providers.Provider) (*oauth2.Token, error) {
+	slog.Debug("starting forced authentication", "provider", provider.Name())
+
+	if err := providers.Validate(provider); err != nil {
+		return nil, fmt.Errorf("invalid provider: %w", err)
+	}
+
+	return a.performOAuthFlow(ctx, provider)
+}
+
 // TokenSource returns an oauth2.TokenSource that automatically refreshes tokens.
 // The token source will persist refreshed tokens to the store.
 func (a *Authenticator) TokenSource(ctx context.Context, provider providers.Provider) (oauth2.TokenSource, error) {
