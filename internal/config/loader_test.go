@@ -29,7 +29,7 @@ func TestLoader_Load(t *testing.T) {
 		]
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -90,7 +90,7 @@ func TestLoader_Load(t *testing.T) {
 		]
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -131,7 +131,7 @@ func TestLoader_Load(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.json")
 		configContent := `{invalid json}`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -146,7 +146,7 @@ func TestLoader_Load(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.json")
 		configContent := `{}`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -170,7 +170,7 @@ func TestLoader_Load(t *testing.T) {
 		"key": "value"
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -195,7 +195,7 @@ func TestLoader_Load(t *testing.T) {
 		"accounts": []
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -228,7 +228,7 @@ func TestLoader_Load(t *testing.T) {
 		]
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -258,7 +258,7 @@ func TestLoader_Load(t *testing.T) {
 		]
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -448,7 +448,7 @@ func TestLoader_Save(t *testing.T) {
 
 		// Write initial config
 		initialContent := `{"google": {"name": "Old Name", "accounts": []}}`
-		if err := os.WriteFile(configPath, []byte(initialContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(initialContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write initial config: %v", err)
 		}
 
@@ -532,7 +532,7 @@ func TestLoader_SnapshotAndRestoreSnapshot(t *testing.T) {
 		loader := NewLoaderWithPath(configPath)
 
 		original := []byte(`{"google":{"name":"Google Calendar","accounts":[]}}`)
-		if err := os.WriteFile(configPath, original, configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, original, ConfigFilePermission); err != nil {
 			t.Fatalf("os.WriteFile() error = %v", err)
 		}
 
@@ -542,7 +542,7 @@ func TestLoader_SnapshotAndRestoreSnapshot(t *testing.T) {
 		}
 
 		updated := []byte(`{"google":{"name":"Updated","accounts":[]}}`)
-		if err := os.WriteFile(configPath, updated, configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, updated, ConfigFilePermission); err != nil {
 			t.Fatalf("os.WriteFile() updated error = %v", err)
 		}
 
@@ -569,7 +569,7 @@ func TestLoader_SnapshotAndRestoreSnapshot(t *testing.T) {
 			t.Fatalf("Snapshot() error = %v", err)
 		}
 
-		if err := os.WriteFile(configPath, []byte(`{"google":{"name":"Google Calendar","accounts":[]}}`), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(`{"google":{"name":"Google Calendar","accounts":[]}}`), ConfigFilePermission); err != nil {
 			t.Fatalf("os.WriteFile() error = %v", err)
 		}
 
@@ -604,7 +604,7 @@ func TestLoader_LoadOrEmpty(t *testing.T) {
 	t.Run("ReturnsErrorForMalformedJSON", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, "config.json")
-		if err := os.WriteFile(configPath, []byte(`{invalid json}`), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(`{invalid json}`), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
@@ -630,7 +630,7 @@ func TestLoader_LoadOrEmpty(t *testing.T) {
 		]
 	}
 }`
-		if err := os.WriteFile(configPath, []byte(configContent), configFilePermission); err != nil {
+		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
 			t.Fatalf("Failed to write test config: %v", err)
 		}
 
