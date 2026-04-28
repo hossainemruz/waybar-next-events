@@ -2,7 +2,7 @@ name: PR Workflow
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, labeled, unlabeled]
+    types: [opened, reopened, synchronize]
 
 jobs:
   build:
@@ -43,12 +43,3 @@ jobs:
 
       - name: Test
         run: mise run test
-
-  label-enforcer:
-    name: Label Enforcer
-    runs-on: ubuntu-latest
-    steps:
-      - uses: yogevbd/enforce-label-action@2.2.2
-        with:
-          REQUIRED_LABELS_ANY: "feature,fix,maintenance"
-          REQUIRED_LABELS_ANY_DESCRIPTION: "The PR must have at least one of these labels: ['feature','fix','maintenance']"

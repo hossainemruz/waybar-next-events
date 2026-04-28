@@ -1,0 +1,8 @@
+fix:
+  - head-branch: ['^fix(?:$|[-/]).*']
+
+feature:
+  - head-branch: ['^(?:feat|feature)(?:$|[-/]).*']
+
+maintenance:
+  - head-branch: ['^chore(?:$|[-/]).*']
