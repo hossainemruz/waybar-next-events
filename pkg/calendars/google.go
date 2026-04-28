@@ -19,22 +19,15 @@ import (
 // future in-memory token cache optimizations.
 var defaultAuthenticator = auth.NewAuthenticator(nil)
 
-// DiscoverCalendars authenticates with the given Google account and fetches the
-// list of available calendars. It returns a slice of DiscoveredCalendar values
-// containing both the config-compatible calendar data and the Primary flag from
-// the Google Calendar API. This is the shared entry point used by both the
-// "list-calendars" command and the "account add/update" flows.
+// DiscoverCalendarsWithAuthenticator authenticates with the given Google
+// account using the provided authenticator and fetches the list of available
+// calendars. It returns a slice of DiscoveredCalendar values containing both
+// the config-compatible calendar data and the Primary flag from the Google
+// Calendar API. This lets interactive account-management flows stage tokens
+// until the full flow succeeds while still reusing the shared discovery path.
 //
 // If the account has no calendars, an empty slice is returned (which the runtime
 // defaults to ["primary"] via GoogleAccount.CalendarIDs).
-func DiscoverCalendars(ctx context.Context, account *config.GoogleAccount) ([]DiscoveredCalendar, error) {
-	return DiscoverCalendarsWithAuthenticator(ctx, account, defaultAuthenticator)
-}
-
-// DiscoverCalendarsWithAuthenticator authenticates with the given Google
-// account using the provided authenticator and fetches the list of available
-// calendars. This lets interactive account-management flows stage tokens until
-// the full flow succeeds while still reusing the shared discovery path.
 func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.GoogleAccount, authenticator *auth.Authenticator) ([]DiscoveredCalendar, error) {
 	googleProvider := providers.NewGoogle(
 		account.ClientID,
