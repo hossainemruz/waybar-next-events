@@ -1,34 +1,41 @@
 name: PR Labels
-
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, labeled, unlabeled]
-
 permissions:
   contents: read
   pull-requests: write
-
 jobs:
   auto-label:
     name: Auto Label
     if: github.event.action == 'opened' || github.event.action == 'reopened' ||
       github.event.action == 'synchronize'
     runs-on: ubuntu-latest
+    outputs:
+      all-labels: ${{ steps.labeler.outputs.all-labels }}
     steps:
       - uses: actions/labeler@v6
+        id: labeler
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           configuration-path: .github/labeler.yml
           sync-labels: true
-
   label-enforcer:
     name: Label Enforcer
     needs: auto-label
     if: '!cancelled()'
     runs-on: ubuntu-latest
     steps:
-      - uses: yogevbd/enforce-label-action@2.2.2
-        with:
-          REQUIRED_LABELS_ANY: "feature,fix,maintenance"
-          REQUIRED_LABELS_ANY_DESCRIPTION: "The PR must have at least one of these labels:
-            ['feature','fix','maintenance']"
+      - name: Enforce required label
+        run: |
+          # Prefer live labels from the labeler job; fall back to event payload
+          # when auto-label was skipped (labeled/unlabeled events).
+          labels="${{ needs.auto-label.outputs.all-labels }}"
+          if [ -z "$labels" ]; then
+            labels="${{ join(github.event.pull_request.labels.*.name, ',') }}"
+          fi
+          echo "Checking labels: $labels"
+          if ! echo "$labels" | tr ',' '\n' | grep -qxE 'feature|fix|maintenance'; then
+            echo "::error::The PR must have at least one of these labels: ['feature','fix','maintenance']"
+            exit 1
+          fi
