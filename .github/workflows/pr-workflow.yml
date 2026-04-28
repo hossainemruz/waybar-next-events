@@ -1,0 +1,54 @@
+name: PR Workflow
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Build
+        run: mise run build
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Lint
+        run: mise run lint
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Test
+        run: mise run test
+
+  label-enforcer:
+    name: Label Enforcer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: yogevbd/enforce-label-action@2.2.2
+        with:
+          REQUIRED_LABELS_ANY: "feature,fix,maintenance"
+          REQUIRED_LABELS_ANY_DESCRIPTION: "The PR must have at least one of these labels: ['feature','fix','maintenance']"

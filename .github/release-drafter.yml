@@ -1,0 +1,29 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+template: |
+  This release includes the latest updates for waybar-next-events.
+
+  Thanks to $CONTRIBUTORS for their valuable contribution in this release.
+  $CHANGES
+
+  This release note has been generated automatically by [Release Drafter](https://github.com/marketplace/actions/release-drafter).
+
+categories:
+  - title: 'Features'
+    label: 'feature'
+
+  - title: 'Fixes'
+    label: 'fix'
+
+  - title: 'Maintenance'
+    label: 'maintenance'
+
+version-resolver:
+  minor:
+    labels:
+      - 'feature'
+  patch:
+    labels:
+      - 'fix'
+      - 'maintenance'
+  default: patch
