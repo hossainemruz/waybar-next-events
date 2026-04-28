@@ -167,27 +167,25 @@ func TestRunAccountLoginPreservesConfigAndTokenOnLoginFailure(t *testing.T) {
 		t.Fatalf("backingStore.Set() error = %v", err)
 	}
 
+	loginFailure := errors.New("browser unavailable")
+
 	err := runAccountLogin(newTestCommand(), accountLoginDependencies{
-		newLoader:   func() *appconfig.Loader { return loader },
-		newPrompter: func(*cobra.Command) accountLoginPrompter { return prompter },
-		newAuthenticator: func() *auth.Authenticator {
-			return auth.NewAuthenticator(backingStore, auth.WithBrowserOpener(func(authURL string) error {
-				parsedURL, err := url.Parse(authURL)
-				if err != nil {
-					return err
-				}
+		newLoader:        func() *appconfig.Loader { return loader },
+		newPrompter:      func(*cobra.Command) accountLoginPrompter { return prompter },
+		newAuthenticator: func() *auth.Authenticator { return auth.NewAuthenticator(backingStore) },
+		loginAccount: func(_ context.Context, _ *auth.Authenticator, account *appconfig.GoogleAccount) error {
+			authURL := (&url.URL{
+				Scheme: "https",
+				Host:   "accounts.google.com",
+				Path:   "/o/oauth2/auth",
+				RawQuery: url.Values{
+					"client_id":    []string{account.ClientID},
+					"redirect_uri": []string{appconfig.DefaultCallbackURL},
+				}.Encode(),
+			}).String()
 
-				if parsedURL.Query().Get("client_id") != "work-client" {
-					return fmt.Errorf("unexpected client_id: %q", parsedURL.Query().Get("client_id"))
-				}
-				if parsedURL.Query().Get("redirect_uri") != appconfig.DefaultCallbackURL {
-					return fmt.Errorf("unexpected redirect_uri: %q", parsedURL.Query().Get("redirect_uri"))
-				}
-
-				return errors.New("browser unavailable")
-			}))
+			return fmt.Errorf("%w: %v (please open this URL manually: %s)", auth.ErrBrowserOpenFailed, loginFailure, authURL)
 		},
-		loginAccount: loginGoogleAccount,
 	})
 	if err == nil {
 		t.Fatal("runAccountLogin() error = nil, want error")
