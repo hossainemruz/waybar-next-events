@@ -13,8 +13,12 @@ var rootCmd = &cobra.Command{
 	Long:  "A CLI tool that displays upcoming calendar events, designed to integrate with Waybar.",
 }
 
+func RootCommand() *cobra.Command {
+	return rootCmd
+}
+
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	if err := RootCommand().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

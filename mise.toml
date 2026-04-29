@@ -5,7 +5,7 @@ golangci-lint = "latest"
 
 [tasks.build]
 description = "Build the binary"
-run = "go build -o bin/waybar-next-events ."
+run = "go build -o bin/waybar-next-events ./cmd/waybar-next-events"
 
 [tasks.format]
 description = "Format Go source files"
@@ -29,7 +29,7 @@ depends = ["format", "lint", "test", "tidy"]
 
 [tasks.dev]
 description = "Run the project in development mode"
-run = "go run main.go"
+run = "go run ./cmd/waybar-next-events"
 
 [tasks.install]
 description = "Build and install the binary to /usr/local/bin"
@@ -39,4 +39,4 @@ run = "sudo cp bin/waybar-next-events /usr/local/bin/"
 [tasks.cmd]
 description = "Run any project command (e.g. mise run cmd list -- --limit 3)"
 usage = 'arg "[args]" var=#true'
-run = "go run main.go ${usage_args:-}"
+run = "go run ./cmd/waybar-next-events ${usage_args:-}"
