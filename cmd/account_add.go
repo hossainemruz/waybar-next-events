@@ -8,11 +8,9 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/hossainemruz/waybar-next-events/internal/auth"
-	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
+	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
@@ -37,11 +35,9 @@ type accountAddPrompter interface {
 }
 
 type accountAddDependencies struct {
-	newLoader         func() *appconfig.Loader
-	newPrompter       func(cmd *cobra.Command) accountAddPrompter
-	newSecretStore    func() secrets.Store
-	newTokenStore     func() tokenstore.TokenStore
-	discoverCalendars func(ctx context.Context, account *appconfig.Account, secretStore secrets.Store, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
+	newLoader   func() *appconfig.Loader
+	newPrompter func(cmd *cobra.Command) accountAddPrompter
+	addAccount  func(ctx context.Context, input app.AddAccountInput) (calendar.Account, error)
 }
 
 var defaultAccountAddDependencies = accountAddDependencies{
@@ -54,13 +50,9 @@ var defaultAccountAddDependencies = accountAddDependencies{
 			output: cmd.ErrOrStderr(),
 		}
 	},
-	newSecretStore: func() secrets.Store {
-		return secrets.NewKeyringStore()
+	addAccount: func(ctx context.Context, input app.AddAccountInput) (calendar.Account, error) {
+		return newAccountManager().AddAccount(ctx, input)
 	},
-	newTokenStore: func() tokenstore.TokenStore {
-		return tokenstore.NewKeyringTokenStore()
-	},
-	discoverCalendars: calendars.DiscoverCalendarsWithAuthenticator,
 }
 
 // accountAddCmd adds a new Google Calendar account via an interactive form.
@@ -84,12 +76,6 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 	}
 
 	loader := deps.newLoader()
-	configSnapshot, err := loader.Snapshot()
-	if err != nil {
-		return fmt.Errorf("failed to snapshot config before save: %w", err)
-	}
-	secretStore := deps.newSecretStore()
-
 	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
 		return err
@@ -104,92 +90,21 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return err
 	}
 
-	accountID, err := appconfig.NewAccountID()
-	if err != nil {
-		return fmt.Errorf("failed to generate account ID: %w", err)
-	}
-
-	collected := collectedAccountInput{
-		Name: strings.TrimSpace(input.Name),
-		Settings: map[string]string{
-			"client_id": strings.TrimSpace(input.ClientID),
+	newAccount, err := deps.addAccount(ctx, app.AddAccountInput{
+		Service:  calendar.ServiceTypeGoogle,
+		Name:     strings.TrimSpace(input.Name),
+		Settings: map[string]string{"client_id": strings.TrimSpace(input.ClientID)},
+		Secrets:  map[string]string{googleClientSecretKey: strings.TrimSpace(input.ClientSecret)},
+		CalendarSelector: accountCalendarSelector{
+			accountName: input.Name,
+			prompter:    prompter,
 		},
-		Secrets: map[string]string{
-			googleClientSecretKey: strings.TrimSpace(input.ClientSecret),
-		},
-	}
-
-	stagedSecretStore := secrets.NewStagedStore()
-	if err := stageGoogleAccountSecrets(ctx, stagedSecretStore, accountID, collected); err != nil {
-		return err
-	}
-
-	stagingStore := tokenstore.NewStagedTokenStore()
-	authenticator := auth.NewAuthenticator(stagingStore)
-	newAccount := buildGoogleAccount(collected, nil)
-	newAccount.ID = accountID
-	newAccount.Service = calendar.ServiceTypeGoogle
-
-	discovered, err := deps.discoverCalendars(ctx, newAccount, stagedSecretStore, authenticator)
+	})
 	if err != nil {
+		if isUserAbort(err) {
+			return nil
+		}
 		return err
-	}
-
-	if len(discovered) == 0 {
-		if err := prompter.ShowNoCalendarsFound(ctx, newAccount.Name); err != nil {
-			if isUserAbort(err) {
-				return nil
-			}
-			return err
-		}
-		newAccount.Calendars = []appconfig.CalendarRef{}
-	} else {
-		selectedCalendars, err := prompter.PromptCalendarSelection(ctx, newAccount.Name, discovered)
-		if err != nil {
-			if isUserAbort(err) {
-				return nil
-			}
-			return err
-		}
-		newAccount.Calendars = selectedCalendars
-	}
-
-	cfg.Accounts = append(cfg.Accounts, *newAccount)
-
-	if err := loader.Save(cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	secretSnapshot, err := snapshotAccountSecrets(ctx, secretStore, newAccount.ID, []string{googleClientSecretKey})
-	if err != nil {
-		rollbackErr := loader.RestoreSnapshot(configSnapshot)
-		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to snapshot account secrets: %w", err), fmt.Errorf("failed to restore config after secret snapshot error: %w", rollbackErr))
-		}
-		return fmt.Errorf("failed to snapshot account secrets: %w", err)
-	}
-
-	if err := stagedSecretStore.Commit(ctx, secretStore); err != nil {
-		rollbackErr := loader.RestoreSnapshot(configSnapshot)
-		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist account secrets: %w", err), fmt.Errorf("failed to restore config after secret persistence error: %w", rollbackErr))
-		}
-		return fmt.Errorf("failed to persist account secrets: %w", err)
-	}
-
-	if err := stagingStore.Commit(ctx, deps.newTokenStore()); err != nil {
-		secretRollbackErr := restoreAccountSecrets(context.Background(), secretStore, newAccount.ID, secretSnapshot)
-		configRollbackErr := loader.RestoreSnapshot(configSnapshot)
-		if secretRollbackErr != nil && configRollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), secretRollbackErr, fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
-		}
-		if secretRollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), secretRollbackErr)
-		}
-		if configRollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
-		}
-		return fmt.Errorf("failed to persist OAuth token: %w", err)
 	}
 
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Added account %q.\n", newAccount.Name)
@@ -316,6 +231,19 @@ func calendarSelectionOptions(discovered []calendars.DiscoveredCalendar) []huh.O
 	return options
 }
 
+type accountCalendarSelector struct {
+	accountName string
+	prompter    accountAddPrompter
+}
+
+func (s accountCalendarSelector) SelectCalendars(ctx context.Context, account calendar.Account, discovered []calendar.Calendar) ([]calendar.CalendarRef, error) {
+	return s.prompter.PromptCalendarSelection(ctx, account.Name, toDiscoveredCalendars(discovered))
+}
+
+func (s accountCalendarSelector) ConfirmEmptyCalendars(ctx context.Context, account calendar.Account) error {
+	return s.prompter.ShowNoCalendarsFound(ctx, account.Name)
+}
+
 func calendarSelectionHeight(optionCount int) int {
 	height := optionCount + 1
 	if height < minCalendarSelectionHeight {
@@ -329,4 +257,20 @@ func calendarSelectionHeight(optionCount int) int {
 
 func isUserAbort(err error) bool {
 	return errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled)
+}
+
+func toDiscoveredCalendars(calendarsList []calendar.Calendar) []calendars.DiscoveredCalendar {
+	if len(calendarsList) == 0 {
+		return []calendars.DiscoveredCalendar{}
+	}
+
+	discovered := make([]calendars.DiscoveredCalendar, 0, len(calendarsList))
+	for _, discoveredCalendar := range calendarsList {
+		discovered = append(discovered, calendars.DiscoveredCalendar{
+			Calendar: appconfig.CalendarRef{ID: discoveredCalendar.ID, Name: discoveredCalendar.Name},
+			Primary:  discoveredCalendar.Primary,
+		})
+	}
+
+	return discovered
 }

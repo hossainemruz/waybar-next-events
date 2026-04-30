@@ -2,14 +2,12 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"charm.land/huh/v2"
-	"github.com/hossainemruz/waybar-next-events/internal/auth"
-	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
+	"github.com/hossainemruz/waybar-next-events/internal/app"
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -19,11 +17,9 @@ type accountDeletePrompter interface {
 }
 
 type accountDeleteDependencies struct {
-	newLoader      func() *appconfig.Loader
-	newPrompter    func(cmd *cobra.Command) accountDeletePrompter
-	newSecretStore func() secrets.Store
-	newTokenStore  func() tokenstore.TokenStore
-	clearToken     func(ctx context.Context, authenticator *auth.Authenticator, secretStore secrets.Store, account *appconfig.Account) error
+	newLoader     func() *appconfig.Loader
+	newPrompter   func(cmd *cobra.Command) accountDeletePrompter
+	deleteAccount func(ctx context.Context, input app.DeleteAccountInput) (calendar.Account, error)
 }
 
 var defaultAccountDeleteDependencies = accountDeleteDependencies{
@@ -38,13 +34,9 @@ var defaultAccountDeleteDependencies = accountDeleteDependencies{
 			},
 		}
 	},
-	newSecretStore: func() secrets.Store {
-		return secrets.NewKeyringStore()
+	deleteAccount: func(ctx context.Context, input app.DeleteAccountInput) (calendar.Account, error) {
+		return newAccountManager().DeleteAccount(ctx, input)
 	},
-	newTokenStore: func() tokenstore.TokenStore {
-		return tokenstore.NewKeyringTokenStore()
-	},
-	clearToken: clearAccountToken,
 }
 
 // accountDeleteCmd deletes a Google Calendar account via an interactive confirmation flow.
@@ -68,12 +60,6 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 	}
 
 	loader := deps.newLoader()
-	configSnapshot, err := loader.Snapshot()
-	if err != nil {
-		return fmt.Errorf("failed to snapshot config before save: %w", err)
-	}
-	secretStore := deps.newSecretStore()
-
 	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
 		return err
@@ -107,50 +93,12 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 		return nil
 	}
 
-	stagingStore := tokenstore.NewStagedTokenStore()
-	stagedSecretStore := secrets.NewStagedStore()
-	authenticator := auth.NewAuthenticator(stagingStore)
-	if err := deps.clearToken(ctx, authenticator, secretStore, selectedAccount); err != nil {
-		return err
-	}
-	secretSnapshot, err := snapshotAccountSecrets(ctx, secretStore, selectedAccount.ID, []string{googleClientSecretKey})
+	deletedAccount, err := deps.deleteAccount(ctx, app.DeleteAccountInput{AccountID: selectedAccount.ID})
 	if err != nil {
-		return fmt.Errorf("failed to snapshot account secrets: %w", err)
-	}
-	if err := stageGoogleAccountSecretDeletion(ctx, stagedSecretStore, selectedAccount.ID); err != nil {
 		return err
 	}
 
-	cfg.Accounts = deleteAccountByID(cfg.Accounts, selectedAccount.ID)
-
-	if err := loader.Save(cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
-	}
-
-	if err := stagedSecretStore.Commit(ctx, secretStore); err != nil {
-		rollbackErr := loader.RestoreSnapshot(configSnapshot)
-		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to remove account secrets: %w", err), fmt.Errorf("failed to restore config after secret persistence error: %w", rollbackErr))
-		}
-		return fmt.Errorf("failed to remove account secrets: %w", err)
-	}
-
-	if err := stagingStore.Commit(ctx, deps.newTokenStore()); err != nil {
-		secretRollbackErr := restoreAccountSecrets(context.Background(), secretStore, selectedAccount.ID, secretSnapshot)
-		configRollbackErr := loader.RestoreSnapshot(configSnapshot)
-		if secretRollbackErr != nil && configRollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token removal: %w", err), secretRollbackErr, fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
-		}
-		if secretRollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token removal: %w", err), secretRollbackErr)
-		}
-		if configRollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token removal: %w", err), fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
-		}
-		return fmt.Errorf("failed to persist OAuth token removal: %w", err)
-	}
-
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted account %q.\n", selectedAccount.Name)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted account %q.\n", deletedAccount.Name)
 	return nil
 }
 
@@ -183,17 +131,6 @@ func (p *huhAccountDeletePrompter) PromptDeleteConfirmation(ctx context.Context,
 	}
 
 	return confirmed, nil
-}
-
-func deleteAccountByID(accounts []appconfig.Account, id string) []appconfig.Account {
-	updatedAccounts := make([]appconfig.Account, 0, len(accounts))
-	for _, account := range accounts {
-		if account.ID == id {
-			continue
-		}
-		updatedAccounts = append(updatedAccounts, account)
-	}
-	return updatedAccounts
 }
 
 var _ accountDeletePrompter = (*huhAccountDeletePrompter)(nil)
