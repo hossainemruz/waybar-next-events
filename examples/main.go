@@ -7,6 +7,7 @@ import (
 
 	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"google.golang.org/api/calendar/v3"
@@ -28,6 +29,7 @@ func main() {
 
 	// Create authenticator with keyring storage
 	authenticator := auth.NewAuthenticator(nil) // nil uses default KeyringTokenStore
+	secretStore := secrets.NewKeyringStore()
 
 	// Authenticate with each configured Google account
 	for i := range googleCfg {
@@ -35,10 +37,15 @@ func main() {
 
 		fmt.Printf("=== Google Account: %s ===\n", account.Name)
 
+		clientSecret, err := secretStore.Get(ctx, account.ID, "client_secret")
+		if err != nil {
+			log.Fatalf("Failed to load client secret for account %q: %v", account.Name, err)
+		}
+
 		// Create Google OAuth2 provider for this account
 		googleProvider := providers.NewGoogle(
 			account.Setting("client_id"),
-			account.Setting("client_secret"),
+			clientSecret,
 			[]string{calendar.CalendarReadonlyScope},
 		)
 

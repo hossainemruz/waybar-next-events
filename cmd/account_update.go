@@ -9,6 +9,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
@@ -32,9 +33,10 @@ type accountUpdatePrompter interface {
 type accountUpdateDependencies struct {
 	newLoader         func() *appconfig.Loader
 	newPrompter       func(cmd *cobra.Command) accountUpdatePrompter
+	newSecretStore    func() secrets.Store
 	newTokenStore     func() tokenstore.TokenStore
-	clearToken        func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error
-	discoverCalendars func(ctx context.Context, account *appconfig.Account, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
+	clearToken        func(ctx context.Context, authenticator *auth.Authenticator, secretStore secrets.Store, account *appconfig.Account) error
+	discoverCalendars func(ctx context.Context, account *appconfig.Account, secretStore secrets.Store, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
 }
 
 var defaultAccountUpdateDependencies = accountUpdateDependencies{
@@ -48,6 +50,9 @@ var defaultAccountUpdateDependencies = accountUpdateDependencies{
 				output: cmd.ErrOrStderr(),
 			},
 		}
+	},
+	newSecretStore: func() secrets.Store {
+		return secrets.NewKeyringStore()
 	},
 	newTokenStore: func() tokenstore.TokenStore {
 		return tokenstore.NewKeyringTokenStore()
@@ -81,6 +86,7 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 	if err != nil {
 		return fmt.Errorf("failed to snapshot config before save: %w", err)
 	}
+	secretStore := deps.newSecretStore()
 
 	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
@@ -104,10 +110,14 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 	if err != nil {
 		return err
 	}
+	originalClientSecret, err := loadGoogleClientSecret(ctx, secretStore, originalAccount)
+	if err != nil {
+		return err
+	}
 	input, err := prompter.PromptAccountDetails(ctx, cfg, accountUpdateInput{
 		Name:         originalAccount.Name,
 		ClientID:     originalAccount.Setting("client_id"),
-		ClientSecret: originalAccount.Setting("client_secret"),
+		ClientSecret: originalClientSecret,
 	})
 	if err != nil {
 		if isUserAbort(err) {
@@ -116,27 +126,39 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return err
 	}
 
-	updatedAccount := &appconfig.Account{
-		ID:        originalAccount.ID,
-		Service:   calendar.ServiceTypeGoogle,
-		Name:      strings.TrimSpace(input.Name),
-		Settings:  cloneSettings(originalAccount.Settings),
-		Calendars: cloneCalendars(originalAccount.Calendars),
+	collected := collectedAccountInput{
+		Name:     strings.TrimSpace(input.Name),
+		Settings: cloneSettings(originalAccount.Settings),
+		Secrets: map[string]string{
+			googleClientSecretKey: strings.TrimSpace(input.ClientSecret),
+		},
 	}
-	updatedAccount.SetSetting("client_id", strings.TrimSpace(input.ClientID))
-	// TODO(subtask-4): move secret fields like client_secret out of persisted config settings.
-	updatedAccount.SetSetting("client_secret", strings.TrimSpace(input.ClientSecret))
+	collected.Settings["client_id"] = strings.TrimSpace(input.ClientID)
+
+	updatedAccount := buildGoogleAccount(collected, originalAccount)
+	updatedAccount.Service = calendar.ServiceTypeGoogle
+
+	stagedSecretStore := secrets.NewStagedStore()
+	if err := stageGoogleAccountSecrets(ctx, stagedSecretStore, updatedAccount.ID, collected); err != nil {
+		return err
+	}
 
 	stagingStore := tokenstore.NewStagedTokenStore()
 	authenticator := auth.NewAuthenticator(stagingStore)
+	backingTokenStore := deps.newTokenStore()
 
-	if accountCredentialsChanged(*originalAccount, *updatedAccount) {
-		if err := deps.clearToken(ctx, authenticator, originalAccount); err != nil {
+	credentialsChanged := accountCredentialsChanged(*originalAccount, originalClientSecret, *updatedAccount, collected.Secrets[googleClientSecretKey])
+	if credentialsChanged {
+		if err := deps.clearToken(ctx, authenticator, secretStore, originalAccount); err != nil {
+			return err
+		}
+	} else {
+		if err := seedStagedTokenStore(ctx, stagingStore, backingTokenStore, originalAccount); err != nil {
 			return err
 		}
 	}
 
-	discovered, err := deps.discoverCalendars(ctx, updatedAccount, authenticator)
+	discovered, err := deps.discoverCalendars(ctx, updatedAccount, stagedSecretStore, authenticator)
 	if err != nil {
 		return err
 	}
@@ -171,16 +193,72 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	if err := stagingStore.Commit(ctx, deps.newTokenStore()); err != nil {
+	secretSnapshot, err := snapshotAccountSecrets(ctx, secretStore, updatedAccount.ID, []string{googleClientSecretKey})
+	if err != nil {
 		rollbackErr := loader.RestoreSnapshot(configSnapshot)
 		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), fmt.Errorf("failed to restore config after token persistence error: %w", rollbackErr))
+			return errors.Join(fmt.Errorf("failed to snapshot account secrets: %w", err), fmt.Errorf("failed to restore config after secret snapshot error: %w", rollbackErr))
+		}
+		return fmt.Errorf("failed to snapshot account secrets: %w", err)
+	}
+
+	if err := stagedSecretStore.Commit(ctx, secretStore); err != nil {
+		rollbackErr := loader.RestoreSnapshot(configSnapshot)
+		if rollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist account secrets: %w", err), fmt.Errorf("failed to restore config after secret persistence error: %w", rollbackErr))
+		}
+		return fmt.Errorf("failed to persist account secrets: %w", err)
+	}
+
+	if err := stagingStore.Commit(ctx, backingTokenStore); err != nil {
+		secretRollbackErr := restoreAccountSecrets(context.Background(), secretStore, updatedAccount.ID, secretSnapshot)
+		configRollbackErr := loader.RestoreSnapshot(configSnapshot)
+		if secretRollbackErr != nil && configRollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), secretRollbackErr, fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
+		}
+		if secretRollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), secretRollbackErr)
+		}
+		if configRollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
 		}
 		return fmt.Errorf("failed to persist OAuth token: %w", err)
 	}
 
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Updated account %q.\n", updatedAccount.Name)
 	return nil
+}
+
+func seedStagedTokenStore(ctx context.Context, stagedStore *tokenstore.StagedTokenStore, backingStore tokenstore.TokenStore, account *appconfig.Account) error {
+	providerName, err := googleProviderName(account)
+	if err != nil {
+		return err
+	}
+
+	token, found, err := backingStore.Get(ctx, providerName)
+	if err != nil {
+		return fmt.Errorf("failed to load existing OAuth token for account %q: %w", account.Name, err)
+	}
+	if !found {
+		return nil
+	}
+
+	if err := stagedStore.Set(ctx, providerName, token); err != nil {
+		return fmt.Errorf("failed to stage existing OAuth token for account %q: %w", account.Name, err)
+	}
+
+	return nil
+}
+
+func googleProviderName(account *appconfig.Account) (string, error) {
+	if account == nil {
+		return "", fmt.Errorf("account cannot be nil")
+	}
+
+	// TODO(subtask-5): stop deriving token keys from client_id and use stable
+	// service/accountID token identity instead.
+	provider := providers.NewGoogle(account.Setting("client_id"), "", nil)
+	return provider.Name(), nil
 }
 
 type huhAccountUpdatePrompter struct {
@@ -299,17 +377,8 @@ func cloneSettings(settings map[string]string) map[string]string {
 	return cloned
 }
 
-func accountCredentialsChanged(original appconfig.Account, updated appconfig.Account) bool {
-	return original.Setting("client_id") != updated.Setting("client_id") || original.Setting("client_secret") != updated.Setting("client_secret")
-}
-
-func clearAccountToken(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error {
-	provider := providers.NewGoogle(account.Setting("client_id"), account.Setting("client_secret"), nil)
-	if err := authenticator.ClearToken(ctx, provider); err != nil {
-		return fmt.Errorf("failed to clear old OAuth token for account %q: %w", account.Name, err)
-	}
-
-	return nil
+func accountCredentialsChanged(original appconfig.Account, originalSecret string, updated appconfig.Account, updatedSecret string) bool {
+	return original.Setting("client_id") != updated.Setting("client_id") || originalSecret != updatedSecret
 }
 
 var _ accountUpdatePrompter = (*huhAccountUpdatePrompter)(nil)

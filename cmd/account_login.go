@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
+	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
 
@@ -17,8 +18,9 @@ type accountLoginPrompter interface {
 type accountLoginDependencies struct {
 	newLoader        func() *appconfig.Loader
 	newPrompter      func(cmd *cobra.Command) accountLoginPrompter
+	newSecretStore   func() secrets.Store
 	newAuthenticator func() *auth.Authenticator
-	loginAccount     func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error
+	loginAccount     func(ctx context.Context, authenticator *auth.Authenticator, secretStore secrets.Store, account *appconfig.Account) error
 }
 
 var defaultAccountLoginDependencies = accountLoginDependencies{
@@ -32,6 +34,9 @@ var defaultAccountLoginDependencies = accountLoginDependencies{
 				output: cmd.ErrOrStderr(),
 			},
 		}
+	},
+	newSecretStore: func() secrets.Store {
+		return secrets.NewKeyringStore()
 	},
 	newAuthenticator: func() *auth.Authenticator {
 		return auth.NewAuthenticator(nil)
@@ -84,7 +89,7 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 	}
 
 	authenticator := deps.newAuthenticator()
-	if err := deps.loginAccount(ctx, authenticator, selectedAccount); err != nil {
+	if err := deps.loginAccount(ctx, authenticator, deps.newSecretStore(), selectedAccount); err != nil {
 		return fmt.Errorf("failed to log in to account %q: %w", selectedAccount.Name, err)
 	}
 
@@ -92,8 +97,11 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 	return nil
 }
 
-func loginGoogleAccount(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error {
-	provider := providers.NewGoogle(account.Setting("client_id"), account.Setting("client_secret"), nil)
+func loginGoogleAccount(ctx context.Context, authenticator *auth.Authenticator, secretStore secrets.Store, account *appconfig.Account) error {
+	provider, err := calendars.GoogleProviderForAccount(ctx, account, secretStore)
+	if err != nil {
+		return err
+	}
 	if _, err := authenticator.ForceAuthenticate(ctx, provider); err != nil {
 		return err
 	}

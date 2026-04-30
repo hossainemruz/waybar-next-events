@@ -21,7 +21,9 @@ func writeTestConfigFile(t *testing.T, content string) string {
 func writeGenericConfig(t *testing.T, accounts []appconfig.Account) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
-	data, err := json.Marshal(&appconfig.Config{Accounts: accounts})
+	cfg := &appconfig.Config{Accounts: accounts}
+	cfg.Normalize()
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
