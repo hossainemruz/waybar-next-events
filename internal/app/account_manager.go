@@ -5,78 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"strings"
 
 	"github.com/hossainemruz/waybar-next-events/internal/auth"
-	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"golang.org/x/oauth2"
 )
-
-// ConfigLoader defines the config operations app workflows require.
-type ConfigLoader interface {
-	Load() (*config.Config, error)
-	LoadOrEmpty() (*config.Config, error)
-	Save(cfg *config.Config) error
-	Snapshot() (config.Snapshot, error)
-	RestoreSnapshot(snapshot config.Snapshot) error
-}
-
-// Authenticator defines the auth operations app workflows require.
-type Authenticator interface {
-	Authenticate(ctx context.Context, provider providers.Provider) (*oauth2.Token, error)
-	ForceAuthenticate(ctx context.Context, provider providers.Provider) (*oauth2.Token, error)
-	HTTPClient(ctx context.Context, provider providers.Provider) (*http.Client, error)
-}
-
-// Service extends the generic calendar service with secret-aware provider wiring.
-type Service interface {
-	calendar.Service
-	Provider(ctx context.Context, account calendar.Account, secretStore secrets.Store) (providers.Provider, error)
-}
-
-// ServiceResolver resolves services by stable type.
-type ServiceResolver interface {
-	Service(serviceType calendar.ServiceType) (calendar.Service, error)
-}
-
-// CalendarSelector handles interactive calendar-selection decisions.
-type CalendarSelector interface {
-	SelectCalendars(ctx context.Context, account calendar.Account, discovered []calendar.Calendar) ([]calendar.CalendarRef, error)
-	ConfirmEmptyCalendars(ctx context.Context, account calendar.Account) error
-}
-
-// AddAccountInput defines the app-layer add-account workflow input.
-type AddAccountInput struct {
-	Service          calendar.ServiceType
-	Name             string
-	Settings         map[string]string
-	Secrets          map[string]string
-	CalendarSelector CalendarSelector
-}
-
-// UpdateAccountInput defines the app-layer update-account workflow input.
-type UpdateAccountInput struct {
-	AccountID        string
-	Name             string
-	Settings         map[string]string
-	Secrets          map[string]string
-	CalendarSelector CalendarSelector
-}
-
-// DeleteAccountInput defines the app-layer delete-account workflow input.
-type DeleteAccountInput struct {
-	AccountID string
-}
-
-// LoginAccountInput defines the app-layer login workflow input.
-type LoginAccountInput struct {
-	AccountID string
-}
 
 // AccountManager owns account workflows.
 type AccountManager struct {
@@ -103,6 +39,14 @@ func NewAccountManager(loader ConfigLoader, services ServiceResolver, secretStor
 }
 
 // AddAccount creates, authenticates, and persists a new account.
+type AddAccountInput struct {
+	Service          calendar.ServiceType
+	Name             string
+	Settings         map[string]string
+	Secrets          map[string]string
+	CalendarSelector CalendarSelector
+}
+
 func (m *AccountManager) AddAccount(ctx context.Context, input AddAccountInput) (calendar.Account, error) {
 	service, err := m.resolveService(input.Service)
 	if err != nil {
@@ -159,6 +103,14 @@ func (m *AccountManager) AddAccount(ctx context.Context, input AddAccountInput) 
 }
 
 // UpdateAccount updates, re-authenticates if needed, and persists an account.
+type UpdateAccountInput struct {
+	AccountID        string
+	Name             string
+	Settings         map[string]string
+	Secrets          map[string]string
+	CalendarSelector CalendarSelector
+}
+
 func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountInput) (calendar.Account, error) {
 	cfg, err := m.loader.LoadOrEmpty()
 	if err != nil {
@@ -232,6 +184,10 @@ func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountI
 }
 
 // DeleteAccount removes an account, its secrets, and its token.
+type DeleteAccountInput struct {
+	AccountID string
+}
+
 func (m *AccountManager) DeleteAccount(ctx context.Context, input DeleteAccountInput) (calendar.Account, error) {
 	cfg, err := m.loader.LoadOrEmpty()
 	if err != nil {
@@ -291,6 +247,10 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, input DeleteAccountI
 }
 
 // LoginAccount performs a forced re-authentication and only commits the new token on success.
+type LoginAccountInput struct {
+	AccountID string
+}
+
 func (m *AccountManager) LoginAccount(ctx context.Context, input LoginAccountInput) (calendar.Account, error) {
 	cfg, err := m.loader.LoadOrEmpty()
 	if err != nil {
