@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
@@ -23,24 +24,21 @@ func main() {
 	}
 
 	// Get Google calendar configuration
-	googleCfg, err := cfg.GetGoogleConfig()
-	if err != nil {
-		log.Fatalf("Failed to get google config: %v", err)
-	}
+	googleCfg := cfg.AccountsByService(appcalendar.ServiceTypeGoogle)
 
 	// Create authenticator with keyring storage
 	authenticator := auth.NewAuthenticator(nil) // nil uses default KeyringTokenStore
 
 	// Authenticate with each configured Google account
-	for i := range googleCfg.Accounts {
-		account := &googleCfg.Accounts[i]
+	for i := range googleCfg {
+		account := &googleCfg[i]
 
 		fmt.Printf("=== Google Account: %s ===\n", account.Name)
 
 		// Create Google OAuth2 provider for this account
 		googleProvider := providers.NewGoogle(
-			account.ClientID,
-			account.ClientSecret,
+			account.Setting("client_id"),
+			account.Setting("client_secret"),
 			[]string{calendar.CalendarReadonlyScope},
 		)
 

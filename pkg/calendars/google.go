@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
@@ -26,12 +27,11 @@ var defaultAuthenticator = auth.NewAuthenticator(nil)
 // Calendar API. This lets interactive account-management flows stage tokens
 // until the full flow succeeds while still reusing the shared discovery path.
 //
-// If the account has no calendars, an empty slice is returned (which the runtime
-// defaults to ["primary"] via GoogleAccount.CalendarIDs).
-func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.GoogleAccount, authenticator *auth.Authenticator) ([]DiscoveredCalendar, error) {
+// If the account has no calendars, an empty slice is returned.
+func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.Account, authenticator *auth.Authenticator) ([]DiscoveredCalendar, error) {
 	googleProvider := providers.NewGoogle(
-		account.ClientID,
-		account.ClientSecret,
+		account.Setting("client_id"),
+		account.Setting("client_secret"),
 		[]string{calendar.CalendarReadonlyScope},
 	)
 
@@ -53,7 +53,7 @@ func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.Goo
 	calendars := make([]DiscoveredCalendar, 0, len(calendarList.Items))
 	for _, item := range calendarList.Items {
 		calendars = append(calendars, DiscoveredCalendar{
-			Calendar: config.Calendar{
+			Calendar: config.CalendarRef{
 				Name: item.Summary,
 				ID:   item.Id,
 			},
@@ -67,19 +67,19 @@ func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.Goo
 // DiscoveredCalendar represents a calendar discovered from the Google Calendar API,
 // including the Primary flag which is useful for display but not stored in config.
 type DiscoveredCalendar struct {
-	Calendar config.Calendar
+	Calendar config.CalendarRef
 	Primary  bool
 }
 
 // getCalendarServiceForAccount returns a Google Calendar service client with
 // automatic authentication and token refresh for the given account.
-func getCalendarServiceForAccount(account *config.GoogleAccount) (*calendar.Service, error) {
+func getCalendarServiceForAccount(account *config.Account) (*calendar.Service, error) {
 	ctx := context.Background()
 
 	// Create Google OAuth provider for this account
 	googleProvider := providers.NewGoogle(
-		account.ClientID,
-		account.ClientSecret,
+		account.Setting("client_id"),
+		account.Setting("client_secret"),
 		[]string{calendar.CalendarReadonlyScope},
 	)
 
@@ -104,10 +104,7 @@ func GoogleEvents() ([]types.Event, error) {
 	}
 
 	// Get Google calendar configuration
-	googleCfg, err := cfg.GetGoogleConfig()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get google config: %w", err)
-	}
+	googleCfg := cfg.AccountsByService(appcalendar.ServiceTypeGoogle)
 
 	dayLimit := 4
 	today := time.Now()
@@ -122,15 +119,15 @@ func GoogleEvents() ([]types.Event, error) {
 
 	var allEvents []types.Event
 
-	for i := range googleCfg.Accounts {
-		account := &googleCfg.Accounts[i]
+	for i := range googleCfg {
+		account := &googleCfg[i]
 
 		srv, err := getCalendarServiceForAccount(account)
 		if err != nil {
 			return nil, err
 		}
 
-		calendarIDs := account.CalendarIDs()
+		calendarIDs := googleCalendarIDs(*account)
 		for _, calID := range calendarIDs {
 			events, err := srv.Events.List(calID).
 				ShowDeleted(false).
@@ -162,6 +159,15 @@ func GoogleEvents() ([]types.Event, error) {
 	})
 
 	return allEvents, nil
+}
+
+func googleCalendarIDs(account config.Account) []string {
+	ids := account.CalendarIDs()
+	if len(ids) == 0 {
+		return []string{"primary"}
+	}
+
+	return ids
 }
 
 func convertGoogleEvents(gEvents []*calendar.Event, dayLimit int, today time.Time) ([]types.Event, error) {

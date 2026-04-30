@@ -74,6 +74,12 @@ func (l *Loader) Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	cfg.Normalize()
+
 	return &cfg, nil
 }
 
@@ -87,7 +93,9 @@ func (l *Loader) LoadOrEmpty() (*Config, error) {
 		// If the file simply doesn't exist, return an empty config (first run).
 		var notFound *ErrConfigNotFound
 		if errors.As(err, &notFound) {
-			return &Config{}, nil
+			cfg := &Config{}
+			cfg.Normalize()
+			return cfg, nil
 		}
 		return nil, err
 	}
@@ -98,22 +106,16 @@ func (l *Loader) LoadOrEmpty() (*Config, error) {
 // It creates the parent directory if it does not exist.
 // The JSON is written with indentation for readability.
 // Returns ErrNilConfig if cfg is nil.
-// Normalizes a nil cfg.Google to a valid empty GoogleCalendar section so that
-// first-run flows persist a well-formed config instead of {"google":null}.
 func (l *Loader) Save(cfg *Config) error {
 	if cfg == nil {
 		return errors.New("cannot save nil config")
 	}
 
-	// Normalize nil Google section to a valid empty state so that first-run
-	// account flows persist a well-formed config (google.accounts: []) instead
-	// of null, which would cause GetGoogleConfig() to fail later.
-	if cfg.Google == nil {
-		cfg.Google = &GoogleCalendar{
-			Name:     "Google Calendar",
-			Accounts: []GoogleAccount{},
-		}
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid config: %w", err)
 	}
+
+	cfg.Normalize()
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -166,21 +168,4 @@ func (l *Loader) RestoreSnapshot(snapshot Snapshot) error {
 	}
 
 	return nil
-}
-
-// GetGoogleConfig extracts and validates the Google calendar configuration from the config.
-// Returns an error if no Google calendar is configured or if any account is missing a required clientId.
-// An empty accounts list is valid and results in a GoogleCalendar with no accounts.
-func (c *Config) GetGoogleConfig() (*GoogleCalendar, error) {
-	// Validate google section exists
-	if c.Google == nil {
-		return nil, ErrNoGoogleCalendar
-	}
-	// Validate no account is missing clientId
-	for i, acc := range c.Google.Accounts {
-		if acc.ClientID == "" {
-			return nil, fmt.Errorf("%w: account %q (index %d)", ErrAccountMissingClientID, acc.Name, i)
-		}
-	}
-	return c.Google, nil
 }

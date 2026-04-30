@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"charm.land/huh/v2"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
@@ -12,14 +11,14 @@ import (
 )
 
 type accountLoginPrompter interface {
-	PromptAccountSelection(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (string, error)
+	PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error)
 }
 
 type accountLoginDependencies struct {
 	newLoader        func() *appconfig.Loader
 	newPrompter      func(cmd *cobra.Command) accountLoginPrompter
 	newAuthenticator func() *auth.Authenticator
-	loginAccount     func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.GoogleAccount) error
+	loginAccount     func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error
 }
 
 var defaultAccountLoginDependencies = accountLoginDependencies{
@@ -61,17 +60,17 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 	}
 
 	loader := deps.newLoader()
-	_, googleCfg, err := loadGoogleConfigOrEmpty(loader)
+	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
 		return err
 	}
 
-	if err := ensureHasAccounts(googleCfg); err != nil {
+	if err := ensureHasAccounts(cfg); err != nil {
 		return err
 	}
 
 	prompter := deps.newPrompter(cmd)
-	selectedAccountName, err := prompter.PromptAccountSelection(ctx, googleCfg)
+	selectedAccountID, err := prompter.PromptAccountSelection(ctx, cfg)
 	if err != nil {
 		if isUserAbort(err) {
 			return nil
@@ -79,7 +78,7 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 		return err
 	}
 
-	selectedAccount, err := findGoogleAccount(googleCfg, selectedAccountName)
+	selectedAccount, err := findAccountByID(cfg, selectedAccountID)
 	if err != nil {
 		return err
 	}
@@ -93,8 +92,8 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 	return nil
 }
 
-func loginGoogleAccount(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.GoogleAccount) error {
-	provider := providers.NewGoogle(account.ClientID, account.ClientSecret, nil)
+func loginGoogleAccount(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error {
+	provider := providers.NewGoogle(account.Setting("client_id"), account.Setting("client_secret"), nil)
 	if _, err := authenticator.ForceAuthenticate(ctx, provider); err != nil {
 		return err
 	}
@@ -106,25 +105,8 @@ type huhAccountLoginPrompter struct {
 	*huhAccountAddPrompter
 }
 
-func (p *huhAccountLoginPrompter) PromptAccountSelection(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (string, error) {
-	selectedAccountName := googleCfg.Accounts[0].Name
-
-	form := p.configureForm(
-		huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Select an account to log in").
-					Options(accountSelectionOptions(googleCfg)...).
-					Value(&selectedAccountName),
-			),
-		),
-	)
-
-	if err := form.RunWithContext(ctx); err != nil {
-		return "", err
-	}
-
-	return selectedAccountName, nil
+func (p *huhAccountLoginPrompter) PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error) {
+	return promptAccountSelection(ctx, p.huhAccountAddPrompter, cfg, "Select an account to log in")
 }
 
 var _ accountLoginPrompter = (*huhAccountLoginPrompter)(nil)

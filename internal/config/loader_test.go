@@ -4,752 +4,212 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 )
 
-func TestLoader_Load(t *testing.T) {
-	t.Run("ValidSingleAccountConfig", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"google": {
-		"name": "Google Calendar",
-		"accounts": [
+func TestLoaderLoadAndSaveRoundTrip(t *testing.T) {
+	loader := NewLoaderWithPath(filepath.Join(t.TempDir(), "config.json"))
+
+	cfg := &Config{
+		Accounts: []Account{
 			{
-				"name": "Work",
-				"clientId": "test-client-id",
-				"clientSecret": "test-client-secret",
-				"calendars": [
-					{
-						"name": "Work Calendar",
-						"id": "work@example.com"
-					}
-				]
-			}
-		]
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		googleCfg, err := cfg.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-
-		if len(googleCfg.Accounts) != 1 {
-			t.Fatalf("Accounts length = %d, want 1", len(googleCfg.Accounts))
-		}
-		if googleCfg.Accounts[0].ClientID != "test-client-id" {
-			t.Errorf("ClientID = %s, want test-client-id", googleCfg.Accounts[0].ClientID)
-		}
-		if googleCfg.Accounts[0].ClientSecret != "test-client-secret" {
-			t.Errorf("ClientSecret = %s, want test-client-secret", googleCfg.Accounts[0].ClientSecret)
-		}
-		if len(googleCfg.Accounts[0].Calendars) != 1 {
-			t.Errorf("Calendars length = %d, want 1", len(googleCfg.Accounts[0].Calendars))
-		}
-		if googleCfg.Accounts[0].Calendars[0].Name != "Work Calendar" {
-			t.Errorf("Calendar Name = %s, want Work Calendar", googleCfg.Accounts[0].Calendars[0].Name)
-		}
-		if googleCfg.Accounts[0].Calendars[0].ID != "work@example.com" {
-			t.Errorf("Calendar ID = %s, want work@example.com", googleCfg.Accounts[0].Calendars[0].ID)
-		}
-	})
-
-	t.Run("ValidMultiAccountConfig", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"google": {
-		"name": "Google Calendar",
-		"accounts": [
-			{
-				"name": "Work",
-				"clientId": "work-client-id",
-				"clientSecret": "work-client-secret"
-			},
-			{
-				"name": "Personal",
-				"clientId": "personal-client-id",
-				"clientSecret": "personal-client-secret",
-				"calendars": [
-					{
-						"name": "Personal Calendar",
-						"id": "personal@gmail.com"
-					}
-				]
-			}
-		]
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		googleCfg, err := cfg.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-
-		if len(googleCfg.Accounts) != 2 {
-			t.Fatalf("Accounts length = %d, want 2", len(googleCfg.Accounts))
-		}
-		if googleCfg.Accounts[0].Name != "Work" {
-			t.Errorf("Account[0] Name = %s, want Work", googleCfg.Accounts[0].Name)
-		}
-		if googleCfg.Accounts[1].Name != "Personal" {
-			t.Errorf("Account[1] Name = %s, want Personal", googleCfg.Accounts[1].Name)
-		}
-	})
-
-	t.Run("MissingFile", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "nonexistent.json")
-
-		loader := NewLoaderWithPath(configPath)
-		_, err := loader.Load()
-		if err == nil {
-			t.Error("Load() expected error for missing file, got nil")
-		}
-	})
-
-	t.Run("InvalidJSON", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{invalid json}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		_, err := loader.Load()
-		if err == nil {
-			t.Error("Load() expected error for invalid JSON, got nil")
-		}
-	})
-
-	t.Run("EmptyConfig", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		_, err = cfg.GetGoogleConfig()
-		if !errors.Is(err, ErrNoGoogleCalendar) {
-			t.Errorf("GetGoogleConfig() error = %v, want ErrNoGoogleCalendar", err)
-		}
-	})
-
-	t.Run("NoGoogleCalendar", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"other": {
-		"key": "value"
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		_, err = cfg.GetGoogleConfig()
-		if !errors.Is(err, ErrNoGoogleCalendar) {
-			t.Errorf("GetGoogleConfig() error = %v, want ErrNoGoogleCalendar", err)
-		}
-	})
-
-	t.Run("EmptyAccounts", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"google": {
-		"name": "Google Calendar",
-		"accounts": []
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		googleCfg, err := cfg.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() unexpected error: %v", err)
-		}
-		if len(googleCfg.Accounts) != 0 {
-			t.Errorf("Accounts length = %d, want 0", len(googleCfg.Accounts))
-		}
-	})
-
-	t.Run("AccountMissingClientID", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"google": {
-		"name": "Google Calendar",
-		"accounts": [
-			{
-				"name": "Work",
-				"clientSecret": "test-secret"
-			}
-		]
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		_, err = cfg.GetGoogleConfig()
-		if !errors.Is(err, ErrAccountMissingClientID) {
-			t.Errorf("GetGoogleConfig() error = %v, want ErrAccountMissingClientID", err)
-		}
-	})
-
-	t.Run("EmptyClientSecret", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"google": {
-		"name": "Google Calendar",
-		"accounts": [
-			{
-				"name": "Work",
-				"clientId": "test-client-id"
-			}
-		]
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		googleCfg, err := cfg.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-
-		if googleCfg.Accounts[0].ClientID != "test-client-id" {
-			t.Errorf("ClientID = %s, want test-client-id", googleCfg.Accounts[0].ClientID)
-		}
-		// Empty clientSecret is valid for public clients
-		if googleCfg.Accounts[0].ClientSecret != "" {
-			t.Errorf("ClientSecret = %s, want empty", googleCfg.Accounts[0].ClientSecret)
-		}
-	})
-}
-
-func TestGoogleAccount_CalendarIDs(t *testing.T) {
-	t.Run("CalendarsConfigured", func(t *testing.T) {
-		account := GoogleAccount{
-			Name:     "Work",
-			ClientID: "test-id",
-			Calendars: []Calendar{
-				{Name: "Work Cal", ID: "work@example.com"},
-				{Name: "Holidays", ID: "holidays@group.calendar.google.com"},
-			},
-		}
-		ids := account.CalendarIDs()
-		if len(ids) != 2 {
-			t.Fatalf("CalendarIDs() length = %d, want 2", len(ids))
-		}
-		if ids[0] != "work@example.com" {
-			t.Errorf("CalendarIDs()[0] = %s, want work@example.com", ids[0])
-		}
-		if ids[1] != "holidays@group.calendar.google.com" {
-			t.Errorf("CalendarIDs()[1] = %s, want holidays@group.calendar.google.com", ids[1])
-		}
-	})
-
-	t.Run("NoCalendars", func(t *testing.T) {
-		account := GoogleAccount{
-			Name:     "Work",
-			ClientID: "test-id",
-		}
-		ids := account.CalendarIDs()
-		if len(ids) != 1 || ids[0] != "primary" {
-			t.Errorf("CalendarIDs() = %v, want [primary]", ids)
-		}
-	})
-
-	t.Run("EmptyCalendars", func(t *testing.T) {
-		account := GoogleAccount{
-			Name:      "Work",
-			ClientID:  "test-id",
-			Calendars: []Calendar{},
-		}
-		ids := account.CalendarIDs()
-		if len(ids) != 1 || ids[0] != "primary" {
-			t.Errorf("CalendarIDs() = %v, want [primary]", ids)
-		}
-	})
-}
-
-func TestDefaultConfigPath(t *testing.T) {
-	path := DefaultConfigPath()
-	if path == "" {
-		t.Error("DefaultConfigPath() returned empty string")
-	}
-	// Should contain the config directory and filename
-	if !contains(path, ConfigDirName) {
-		t.Errorf("DefaultConfigPath() = %s, should contain %s", path, ConfigDirName)
-	}
-	if !contains(path, ConfigFileName) {
-		t.Errorf("DefaultConfigPath() = %s, should contain %s", path, ConfigFileName)
-	}
-}
-
-func TestLoader_Save(t *testing.T) {
-	t.Run("SaveAndRoundTrip", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		cfg := &Config{
-			Google: &GoogleCalendar{
-				Name: "Google Calendar",
-				Accounts: []GoogleAccount{
-					{
-						Name:         "Work",
-						ClientID:     "test-client-id",
-						ClientSecret: "test-client-secret",
-						Calendars: []Calendar{
-							{Name: "Work Calendar", ID: "work@example.com"},
-						},
-					},
+				ID:      "acct-b",
+				Service: calendar.ServiceTypeGoogle,
+				Name:    "Personal",
+				Settings: map[string]string{
+					"client_id":     "personal-client",
+					"client_secret": "personal-secret",
 				},
+				Calendars: []CalendarRef{{ID: "home", Name: "Home"}},
 			},
-		}
-
-		if err := loader.Save(cfg); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		loaded, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() after Save() error = %v", err)
-		}
-
-		got, err := loaded.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-
-		if len(got.Accounts) != 1 {
-			t.Fatalf("Accounts length = %d, want 1", len(got.Accounts))
-		}
-		if got.Accounts[0].Name != "Work" {
-			t.Errorf("Account Name = %s, want Work", got.Accounts[0].Name)
-		}
-		if got.Accounts[0].ClientID != "test-client-id" {
-			t.Errorf("ClientID = %s, want test-client-id", got.Accounts[0].ClientID)
-		}
-	})
-
-	t.Run("CreatesParentDirectory", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "nested", "dir", "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		cfg := &Config{
-			Google: &GoogleCalendar{
-				Name:     "Google Calendar",
-				Accounts: []GoogleAccount{},
-			},
-		}
-
-		if err := loader.Save(cfg); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			t.Error("config file was not created")
-		}
-	})
-
-	t.Run("PreservesEmptyAccounts", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		cfg := &Config{
-			Google: &GoogleCalendar{
-				Name:     "Google Calendar",
-				Accounts: []GoogleAccount{},
-			},
-		}
-
-		if err := loader.Save(cfg); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		loaded, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		got, err := loaded.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-
-		if len(got.Accounts) != 0 {
-			t.Errorf("Accounts length = %d, want 0", len(got.Accounts))
-		}
-	})
-
-	t.Run("OverwritesExistingFile", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-
-		// Write initial config
-		initialContent := `{"google": {"name": "Old Name", "accounts": []}}`
-		if err := os.WriteFile(configPath, []byte(initialContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write initial config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg := &Config{
-			Google: &GoogleCalendar{
-				Name:     "New Name",
-				Accounts: []GoogleAccount{},
-			},
-		}
-
-		if err := loader.Save(cfg); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		loaded, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		got, err := loaded.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-
-		if got.Name != "New Name" {
-			t.Errorf("Name = %s, want New Name", got.Name)
-		}
-	})
-
-	t.Run("RejectsNilConfig", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		err := loader.Save(nil)
-		if err == nil {
-			t.Fatal("Save(nil) expected error, got nil")
-		}
-
-		// File should not have been created
-		if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-			t.Error("Save(nil) should not create a file")
-		}
-	})
-
-	t.Run("NormalizesNilGoogleSection", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		cfg := &Config{Google: nil}
-
-		if err := loader.Save(cfg); err != nil {
-			t.Fatalf("Save() error = %v", err)
-		}
-
-		loaded, err := loader.Load()
-		if err != nil {
-			t.Fatalf("Load() error = %v", err)
-		}
-
-		got, err := loaded.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() unexpected error: %v", err)
-		}
-
-		if got.Name != "Google Calendar" {
-			t.Errorf("Google.Name = %s, want Google Calendar", got.Name)
-		}
-		if len(got.Accounts) != 0 {
-			t.Errorf("Accounts length = %d, want 0", len(got.Accounts))
-		}
-	})
-}
-
-func TestLoader_SnapshotAndRestoreSnapshot(t *testing.T) {
-	t.Run("RestoresExistingFile", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		original := []byte(`{"google":{"name":"Google Calendar","accounts":[]}}`)
-		if err := os.WriteFile(configPath, original, ConfigFilePermission); err != nil {
-			t.Fatalf("os.WriteFile() error = %v", err)
-		}
-
-		snapshot, err := loader.Snapshot()
-		if err != nil {
-			t.Fatalf("Snapshot() error = %v", err)
-		}
-
-		updated := []byte(`{"google":{"name":"Updated","accounts":[]}}`)
-		if err := os.WriteFile(configPath, updated, ConfigFilePermission); err != nil {
-			t.Fatalf("os.WriteFile() updated error = %v", err)
-		}
-
-		if err := loader.RestoreSnapshot(snapshot); err != nil {
-			t.Fatalf("RestoreSnapshot() error = %v", err)
-		}
-
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			t.Fatalf("os.ReadFile() error = %v", err)
-		}
-		if string(data) != string(original) {
-			t.Fatalf("restored data = %s, want %s", string(data), string(original))
-		}
-	})
-
-	t.Run("RemovesCreatedFileWhenSnapshotWasEmpty", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		loader := NewLoaderWithPath(configPath)
-
-		snapshot, err := loader.Snapshot()
-		if err != nil {
-			t.Fatalf("Snapshot() error = %v", err)
-		}
-
-		if err := os.WriteFile(configPath, []byte(`{"google":{"name":"Google Calendar","accounts":[]}}`), ConfigFilePermission); err != nil {
-			t.Fatalf("os.WriteFile() error = %v", err)
-		}
-
-		if err := loader.RestoreSnapshot(snapshot); err != nil {
-			t.Fatalf("RestoreSnapshot() error = %v", err)
-		}
-
-		if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-			t.Fatalf("config file should not exist after restore, stat error = %v", err)
-		}
-	})
-}
-
-func TestLoader_LoadOrEmpty(t *testing.T) {
-	t.Run("ReturnsEmptyConfigWhenFileNotFound", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "nonexistent.json")
-		loader := NewLoaderWithPath(configPath)
-
-		cfg, err := loader.LoadOrEmpty()
-		if err != nil {
-			t.Fatalf("LoadOrEmpty() error = %v", err)
-		}
-		if cfg == nil {
-			t.Fatal("LoadOrEmpty() returned nil config")
-		}
-		if cfg.Google != nil {
-			t.Error("Expected nil Google field for empty config")
-		}
-	})
-
-	t.Run("ReturnsErrorForMalformedJSON", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		if err := os.WriteFile(configPath, []byte(`{invalid json}`), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		_, err := loader.LoadOrEmpty()
-		if err == nil {
-			t.Error("LoadOrEmpty() expected error for malformed JSON, got nil")
-		}
-	})
-
-	t.Run("ReturnsConfigWhenFileExists", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
-		configContent := `{
-	"google": {
-		"name": "Google Calendar",
-		"accounts": [
 			{
-				"name": "Work",
-				"clientId": "test-id",
-				"clientSecret": "test-secret"
-			}
-		]
-	}
-}`
-		if err := os.WriteFile(configPath, []byte(configContent), ConfigFilePermission); err != nil {
-			t.Fatalf("Failed to write test config: %v", err)
-		}
-
-		loader := NewLoaderWithPath(configPath)
-		cfg, err := loader.LoadOrEmpty()
-		if err != nil {
-			t.Fatalf("LoadOrEmpty() error = %v", err)
-		}
-
-		got, err := cfg.GetGoogleConfig()
-		if err != nil {
-			t.Fatalf("GetGoogleConfig() error = %v", err)
-		}
-		if len(got.Accounts) != 1 {
-			t.Errorf("Accounts length = %d, want 1", len(got.Accounts))
-		}
-	})
-}
-
-func TestGoogleCalendar_FindAccountByName(t *testing.T) {
-	cal := &GoogleCalendar{
-		Name: "Google Calendar",
-		Accounts: []GoogleAccount{
-			{Name: "Work", ClientID: "work-id", ClientSecret: "work-secret"},
-			{Name: "Personal", ClientID: "personal-id", ClientSecret: "personal-secret"},
+				ID:      "acct-a",
+				Service: calendar.ServiceTypeGoogle,
+				Name:    "Work",
+				Settings: map[string]string{
+					"client_id":     "work-client",
+					"client_secret": "work-secret",
+				},
+				Calendars: []CalendarRef{{ID: "team", Name: "Team"}, {ID: "primary", Name: "Primary"}},
+			},
 		},
 	}
 
-	t.Run("FindsExistingAccount", func(t *testing.T) {
-		acc := cal.FindAccountByName("Work")
-		if acc == nil {
-			t.Fatal("FindAccountByName(Work) returned nil")
-		}
-		if acc.Name != "Work" {
-			t.Errorf("Account Name = %s, want Work", acc.Name)
-		}
-	})
-
-	t.Run("ReturnsNilForMissingAccount", func(t *testing.T) {
-		acc := cal.FindAccountByName("NonExistent")
-		if acc != nil {
-			t.Errorf("FindAccountByName(NonExistent) = %+v, want nil", acc)
-		}
-	})
-}
-
-func TestGoogleCalendar_AccountNames(t *testing.T) {
-	t.Run("ReturnsAllNames", func(t *testing.T) {
-		cal := &GoogleCalendar{
-			Name: "Google Calendar",
-			Accounts: []GoogleAccount{
-				{Name: "Work"},
-				{Name: "Personal"},
-			},
-		}
-		names := cal.AccountNames()
-		if len(names) != 2 || names[0] != "Work" || names[1] != "Personal" {
-			t.Errorf("AccountNames() = %v, want [Work Personal]", names)
-		}
-	})
-
-	t.Run("ReturnsEmptySliceForNoAccounts", func(t *testing.T) {
-		cal := &GoogleCalendar{
-			Name:     "Google Calendar",
-			Accounts: []GoogleAccount{},
-		}
-		names := cal.AccountNames()
-		if len(names) != 0 {
-			t.Errorf("AccountNames() = %v, want empty slice", names)
-		}
-	})
-}
-
-func TestConfig_EnsureGoogleInitialized(t *testing.T) {
-	t.Run("InitializesNilGoogle", func(t *testing.T) {
-		cfg := &Config{}
-		cfg.EnsureGoogleInitialized()
-		if cfg.Google == nil {
-			t.Fatal("EnsureGoogleInitialized() did not initialize Google field")
-		}
-		if cfg.Google.Name != "Google Calendar" {
-			t.Errorf("Google.Name = %s, want Google Calendar", cfg.Google.Name)
-		}
-		if cfg.Google.Accounts == nil {
-			t.Error("Accounts should be initialized as empty slice, not nil")
-		}
-		if len(cfg.Google.Accounts) != 0 {
-			t.Errorf("Accounts length = %d, want 0", len(cfg.Google.Accounts))
-		}
-	})
-
-	t.Run("DoesNotOverwriteExistingGoogle", func(t *testing.T) {
-		cfg := &Config{
-			Google: &GoogleCalendar{
-				Name: "Existing",
-				Accounts: []GoogleAccount{
-					{Name: "Work"},
-				},
-			},
-		}
-		cfg.EnsureGoogleInitialized()
-		if cfg.Google.Name != "Existing" {
-			t.Errorf("Google.Name = %s, want Existing", cfg.Google.Name)
-		}
-		if len(cfg.Google.Accounts) != 1 {
-			t.Errorf("Accounts length = %d, want 1", len(cfg.Google.Accounts))
-		}
-	})
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	if err := loader.Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
 	}
-	return false
+
+	loaded, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if len(loaded.Accounts) != 2 {
+		t.Fatalf("len(loaded.Accounts) = %d, want 2", len(loaded.Accounts))
+	}
+	if loaded.Accounts[0].ID != "acct-a" || loaded.Accounts[1].ID != "acct-b" {
+		t.Fatalf("loaded account order = [%s %s], want [acct-a acct-b]", loaded.Accounts[0].ID, loaded.Accounts[1].ID)
+	}
+	if got := loaded.FindAccountByID("acct-a"); got == nil || got.Name != "Work" {
+		t.Fatalf("FindAccountByID(acct-a) = %+v, want Work account", got)
+	}
+	if got := loaded.FindAccountByName("Personal"); got == nil || got.ID != "acct-b" {
+		t.Fatalf("FindAccountByName(Personal) = %+v, want acct-b", got)
+	}
+	if ids := loaded.FindAccountByID("acct-a").CalendarIDs(); len(ids) != 2 || ids[0] != "primary" || ids[1] != "team" {
+		t.Fatalf("CalendarIDs() = %v, want [primary team]", ids)
+	}
+}
+
+func TestLoaderLoadOrEmptyReturnsEmptyConfig(t *testing.T) {
+	loader := NewLoaderWithPath(filepath.Join(t.TempDir(), "missing.json"))
+
+	cfg, err := loader.LoadOrEmpty()
+	if err != nil {
+		t.Fatalf("LoadOrEmpty() error = %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("LoadOrEmpty() returned nil config")
+	}
+	if cfg.Accounts == nil {
+		t.Fatal("Accounts = nil, want empty slice")
+	}
+	if len(cfg.Accounts) != 0 {
+		t.Fatalf("len(cfg.Accounts) = %d, want 0", len(cfg.Accounts))
+	}
+}
+
+func TestLoaderSaveGeneratesMissingAccountIDs(t *testing.T) {
+	loader := NewLoaderWithPath(filepath.Join(t.TempDir(), "config.json"))
+
+	cfg := &Config{
+		Accounts: []Account{{
+			Service:  calendar.ServiceTypeGoogle,
+			Name:     "Work",
+			Settings: map[string]string{"client_id": "client"},
+		}},
+	}
+
+	if err := loader.Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if cfg.Accounts[0].ID == "" {
+		t.Fatal("Save() did not generate account ID")
+	}
+}
+
+func TestLoaderSaveRejectsDuplicateAccountNames(t *testing.T) {
+	loader := NewLoaderWithPath(filepath.Join(t.TempDir(), "config.json"))
+
+	err := loader.Save(&Config{Accounts: []Account{
+		{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "Work"},
+		{ID: "b", Service: calendar.ServiceTypeGoogle, Name: "Work"},
+	}})
+	if !errors.Is(err, ErrDuplicateAccountName) {
+		t.Fatalf("Save() error = %v, want ErrDuplicateAccountName", err)
+	}
+}
+
+func TestLoaderSaveRejectsDuplicateAccountIDs(t *testing.T) {
+	loader := NewLoaderWithPath(filepath.Join(t.TempDir(), "config.json"))
+
+	err := loader.Save(&Config{Accounts: []Account{
+		{ID: "same-id", Service: calendar.ServiceTypeGoogle, Name: "Work"},
+		{ID: "same-id", Service: calendar.ServiceType("outlook"), Name: "Mail"},
+	}})
+	if !errors.Is(err, ErrDuplicateAccountID) {
+		t.Fatalf("Save() error = %v, want ErrDuplicateAccountID", err)
+	}
+}
+
+func TestLoaderSaveIsDeterministic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	loader := NewLoaderWithPath(path)
+
+	cfg := &Config{Accounts: []Account{{
+		ID:      "acct-2",
+		Service: calendar.ServiceTypeGoogle,
+		Name:    "Work",
+		Settings: map[string]string{
+			"client_secret": "secret",
+			"client_id":     "client",
+		},
+		Calendars: []CalendarRef{{ID: "b", Name: "B"}, {ID: "a", Name: "A"}},
+	}, {
+		ID:      "acct-1",
+		Service: calendar.ServiceType("outlook"),
+		Name:    "Mail",
+	}}}
+
+	if err := loader.Save(cfg); err != nil {
+		t.Fatalf("first Save() error = %v", err)
+	}
+	first, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	if err := loader.Save(cfg); err != nil {
+		t.Fatalf("second Save() error = %v", err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	if string(first) != string(second) {
+		t.Fatalf("saved JSON changed between writes\nfirst: %s\nsecond: %s", first, second)
+	}
+	if !strings.Contains(string(first), `"accounts"`) || strings.Contains(string(first), `"google":`) {
+		t.Fatalf("saved JSON = %s, want generic accounts shape only", first)
+	}
+}
+
+func TestConfigHelpers(t *testing.T) {
+	cfg := &Config{Accounts: []Account{
+		{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "Work"},
+		{ID: "b", Service: calendar.ServiceType("outlook"), Name: "Mail"},
+		{ID: "c", Service: calendar.ServiceTypeGoogle, Name: "Personal"},
+	}}
+
+	if got := cfg.AccountNames(); len(got) != 3 || got[0] != "Work" || got[1] != "Mail" || got[2] != "Personal" {
+		t.Fatalf("AccountNames() = %v", got)
+	}
+	googleAccounts := cfg.AccountsByService(calendar.ServiceTypeGoogle)
+	if len(googleAccounts) != 2 {
+		t.Fatalf("len(AccountsByService(google)) = %d, want 2", len(googleAccounts))
+	}
+}
+
+func TestLoaderSnapshotAndRestore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	loader := NewLoaderWithPath(path)
+
+	if err := os.WriteFile(path, []byte(`{"accounts":[]}`), ConfigFilePermission); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	snapshot, err := loader.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"accounts":[{"id":"a","service":"google","name":"Work"}]}`), ConfigFilePermission); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if err := loader.RestoreSnapshot(snapshot); err != nil {
+		t.Fatalf("RestoreSnapshot() error = %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != `{"accounts":[]}` {
+		t.Fatalf("restored config = %s, want empty accounts config", data)
+	}
 }

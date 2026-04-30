@@ -13,7 +13,7 @@ import (
 )
 
 type accountDeletePrompter interface {
-	PromptAccountSelection(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (string, error)
+	PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error)
 	PromptDeleteConfirmation(ctx context.Context, accountName string) (bool, error)
 }
 
@@ -21,7 +21,7 @@ type accountDeleteDependencies struct {
 	newLoader     func() *appconfig.Loader
 	newPrompter   func(cmd *cobra.Command) accountDeletePrompter
 	newTokenStore func() tokenstore.TokenStore
-	clearToken    func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.GoogleAccount) error
+	clearToken    func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error
 }
 
 var defaultAccountDeleteDependencies = accountDeleteDependencies{
@@ -39,7 +39,7 @@ var defaultAccountDeleteDependencies = accountDeleteDependencies{
 	newTokenStore: func() tokenstore.TokenStore {
 		return tokenstore.NewKeyringTokenStore()
 	},
-	clearToken: clearGoogleAccountToken,
+	clearToken: clearAccountToken,
 }
 
 // accountDeleteCmd deletes a Google Calendar account via an interactive confirmation flow.
@@ -68,17 +68,17 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 		return fmt.Errorf("failed to snapshot config before save: %w", err)
 	}
 
-	cfg, googleCfg, err := loadGoogleConfigOrEmpty(loader)
+	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
 		return err
 	}
 
-	if err := ensureHasAccounts(googleCfg); err != nil {
+	if err := ensureHasAccounts(cfg); err != nil {
 		return err
 	}
 
 	prompter := deps.newPrompter(cmd)
-	selectedAccountName, err := prompter.PromptAccountSelection(ctx, googleCfg)
+	selectedAccountID, err := prompter.PromptAccountSelection(ctx, cfg)
 	if err != nil {
 		if isUserAbort(err) {
 			return nil
@@ -86,18 +86,10 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 		return err
 	}
 
-	selectedIndex := -1
-	for i := range googleCfg.Accounts {
-		if googleCfg.Accounts[i].Name == selectedAccountName {
-			selectedIndex = i
-			break
-		}
+	selectedAccount, err := findAccountByID(cfg, selectedAccountID)
+	if err != nil {
+		return err
 	}
-	if selectedIndex == -1 {
-		return fmt.Errorf("%w: %q", appconfig.ErrAccountNotFound, selectedAccountName)
-	}
-
-	selectedAccount := googleCfg.Accounts[selectedIndex]
 	confirmed, err := prompter.PromptDeleteConfirmation(ctx, selectedAccount.Name)
 	if err != nil {
 		if isUserAbort(err) {
@@ -111,11 +103,11 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 
 	stagingStore := tokenstore.NewStagedTokenStore()
 	authenticator := auth.NewAuthenticator(stagingStore)
-	if err := deps.clearToken(ctx, authenticator, &selectedAccount); err != nil {
+	if err := deps.clearToken(ctx, authenticator, selectedAccount); err != nil {
 		return err
 	}
 
-	googleCfg.Accounts = deleteGoogleAccountAt(googleCfg.Accounts, selectedIndex)
+	cfg.Accounts = deleteAccountByID(cfg.Accounts, selectedAccount.ID)
 
 	if err := loader.Save(cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
@@ -137,25 +129,8 @@ type huhAccountDeletePrompter struct {
 	*huhAccountAddPrompter
 }
 
-func (p *huhAccountDeletePrompter) PromptAccountSelection(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (string, error) {
-	selectedAccountName := googleCfg.Accounts[0].Name
-
-	form := p.configureForm(
-		huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Select an account to delete").
-					Options(accountSelectionOptions(googleCfg)...).
-					Value(&selectedAccountName),
-			),
-		),
-	)
-
-	if err := form.RunWithContext(ctx); err != nil {
-		return "", err
-	}
-
-	return selectedAccountName, nil
+func (p *huhAccountDeletePrompter) PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error) {
+	return promptAccountSelection(ctx, p.huhAccountAddPrompter, cfg, "Select an account to delete")
 }
 
 func (p *huhAccountDeletePrompter) PromptDeleteConfirmation(ctx context.Context, accountName string) (bool, error) {
@@ -181,14 +156,14 @@ func (p *huhAccountDeletePrompter) PromptDeleteConfirmation(ctx context.Context,
 	return confirmed, nil
 }
 
-func deleteGoogleAccountAt(accounts []appconfig.GoogleAccount, index int) []appconfig.GoogleAccount {
-	if index < 0 || index >= len(accounts) {
-		return accounts
+func deleteAccountByID(accounts []appconfig.Account, id string) []appconfig.Account {
+	updatedAccounts := make([]appconfig.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if account.ID == id {
+			continue
+		}
+		updatedAccounts = append(updatedAccounts, account)
 	}
-
-	updatedAccounts := make([]appconfig.GoogleAccount, 0, len(accounts)-1)
-	updatedAccounts = append(updatedAccounts, accounts[:index]...)
-	updatedAccounts = append(updatedAccounts, accounts[index+1:]...)
 	return updatedAccounts
 }
 

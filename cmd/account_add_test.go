@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 
+	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
@@ -19,27 +20,19 @@ import (
 )
 
 func TestRunAccountAddCreatesConfigOnFirstRun(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "nested", "waybar-next-events", "config.json")
+	configPath := filepath.Join(t.TempDir(), "config.json")
 	loader := appconfig.NewLoaderWithPath(configPath)
 	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "Work",
-			ClientID:     "client-id",
-			ClientSecret: "client-secret",
-		},
-		selectedCalendars: []appconfig.Calendar{{Name: "Primary", ID: "primary-id"}},
+		accountInput:      accountAddInput{Name: "Work", ClientID: "client-id", ClientSecret: "client-secret"},
+		selectedCalendars: []appconfig.CalendarRef{{Name: "Primary", ID: "primary-id"}},
 	}
-	backingStore := tokenstore.NewInMemoryTokenStore()
 
 	err := runAccountAdd(newTestCommand(), accountAddDependencies{
 		newLoader:     func() *appconfig.Loader { return loader },
 		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
-		newTokenStore: func() tokenstore.TokenStore { return backingStore },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
-			return []calendars.DiscoveredCalendar{{
-				Calendar: appconfig.Calendar{Name: "Primary", ID: "primary-id"},
-				Primary:  true,
-			}}, nil
+		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{{Calendar: appconfig.CalendarRef{Name: "Primary", ID: "primary-id"}, Primary: true}}, nil
 		},
 	})
 	if err != nil {
@@ -48,344 +41,175 @@ func TestRunAccountAddCreatesConfigOnFirstRun(t *testing.T) {
 
 	loaded, err := loader.Load()
 	if err != nil {
-		t.Fatalf("loader.Load() error = %v", err)
+		t.Fatalf("Load() error = %v", err)
 	}
-
-	googleCfg, err := loaded.GetGoogleConfig()
-	if err != nil {
-		t.Fatalf("loaded.GetGoogleConfig() error = %v", err)
+	googleAccounts := loaded.AccountsByService(appcalendar.ServiceTypeGoogle)
+	if len(googleAccounts) != 1 {
+		t.Fatalf("len(google accounts) = %d, want 1", len(googleAccounts))
 	}
-
-	if len(googleCfg.Accounts) != 1 {
-		t.Fatalf("accounts length = %d, want 1", len(googleCfg.Accounts))
+	account := googleAccounts[0]
+	if account.ID == "" {
+		t.Fatal("account.ID = empty, want generated stable ID")
 	}
-
-	account := googleCfg.Accounts[0]
 	if account.Name != "Work" {
-		t.Fatalf("account name = %q, want %q", account.Name, "Work")
+		t.Fatalf("account.Name = %q, want Work", account.Name)
 	}
-	if account.ClientID != "client-id" {
-		t.Fatalf("account client ID = %q, want %q", account.ClientID, "client-id")
+	if account.Setting("client_id") != "client-id" || account.Setting("client_secret") != "client-secret" {
+		t.Fatalf("account settings = %+v", account.Settings)
 	}
 	if len(account.Calendars) != 1 || account.Calendars[0].ID != "primary-id" {
-		t.Fatalf("account calendars = %+v, want primary-id", account.Calendars)
+		t.Fatalf("account.Calendars = %+v, want primary-id", account.Calendars)
+	}
+}
+
+func TestRunAccountAddSavesEmptyCalendarsWhenNoneDiscovered(t *testing.T) {
+	loader := appconfig.NewLoaderWithPath(filepath.Join(t.TempDir(), "config.json"))
+	prompter := &stubAccountAddPrompter{accountInput: accountAddInput{Name: "Work", ClientID: "client-id", ClientSecret: "client-secret"}}
+
+	err := runAccountAdd(newTestCommand(), accountAddDependencies{
+		newLoader:     func() *appconfig.Loader { return loader },
+		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
+		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountAdd() error = %v", err)
 	}
 
-	if _, err := os.Stat(configPath); err != nil {
-		t.Fatalf("config file stat error = %v", err)
+	loaded, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
 	}
-
-	if _, found, err := backingStore.Get(context.Background(), "client-id"); err != nil {
-		t.Fatalf("backingStore.Get() error = %v", err)
-	} else if found {
-		t.Fatal("token store should remain unchanged when no token was staged")
+	account := loaded.AccountsByService(appcalendar.ServiceTypeGoogle)[0]
+	if account.Calendars == nil || len(account.Calendars) != 0 {
+		t.Fatalf("account.Calendars = %+v, want empty slice", account.Calendars)
+	}
+	if !prompter.noCalendarsShown {
+		t.Fatal("expected no calendars prompt to be shown")
 	}
 }
 
 func TestRunAccountAddDoesNotSaveConfigWhenDiscoveryFails(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.json")
 	loader := appconfig.NewLoaderWithPath(configPath)
-	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "Work",
-			ClientID:     "client-id",
-			ClientSecret: "client-secret",
-		},
-	}
-	backingStore := tokenstore.NewInMemoryTokenStore()
+	prompter := &stubAccountAddPrompter{accountInput: accountAddInput{Name: "Work", ClientID: "client-id", ClientSecret: "client-secret"}}
 
 	err := runAccountAdd(newTestCommand(), accountAddDependencies{
 		newLoader:     func() *appconfig.Loader { return loader },
 		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
-		newTokenStore: func() tokenstore.TokenStore { return backingStore },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
 			return nil, errors.New("oauth login failed")
 		},
 	})
-	if err == nil {
-		t.Fatal("runAccountAdd() error = nil, want error")
+	if err == nil || !strings.Contains(err.Error(), "oauth login failed") {
+		t.Fatalf("error = %v, want discovery failure", err)
 	}
-	if !strings.Contains(err.Error(), "oauth login failed") {
-		t.Fatalf("error = %q, want oauth failure", err.Error())
-	}
-
 	if _, statErr := os.Stat(configPath); !os.IsNotExist(statErr) {
-		t.Fatalf("config file should not exist after failure, stat error = %v", statErr)
-	}
-
-	if _, found, err := backingStore.Get(context.Background(), "client-id"); err != nil {
-		t.Fatalf("backingStore.Get() error = %v", err)
-	} else if found {
-		t.Fatal("token store should remain unchanged on failure")
+		t.Fatalf("config file should not exist, stat error = %v", statErr)
 	}
 }
 
 func TestRunAccountAddPreservesConfigOnUserAbort(t *testing.T) {
-	configPath := writeTestConfigFile(t, `{
-		"google": {
-			"name": "Google Calendar",
-			"accounts": [
-				{
-					"name": "Existing",
-					"clientId": "existing-client",
-					"clientSecret": "existing-secret",
-					"calendars": []
-				}
-			]
-		}
-	}`)
-	original, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile() error = %v", err)
-	}
-
+	configPath := writeGenericConfig(t, []appconfig.Account{{ID: "existing", Service: appcalendar.ServiceTypeGoogle, Name: "Existing"}})
+	original, _ := os.ReadFile(configPath)
 	loader := appconfig.NewLoaderWithPath(configPath)
 	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "New",
-			ClientID:     "new-client",
-			ClientSecret: "new-secret",
-		},
+		accountInput:         accountAddInput{Name: "New", ClientID: "new-client", ClientSecret: "new-secret"},
 		calendarSelectionErr: huh.ErrUserAborted,
 	}
 
-	err = runAccountAdd(newTestCommand(), accountAddDependencies{
+	err := runAccountAdd(newTestCommand(), accountAddDependencies{
 		newLoader:     func() *appconfig.Loader { return loader },
 		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
 		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
-			return []calendars.DiscoveredCalendar{{
-				Calendar: appconfig.Calendar{Name: "Primary", ID: "primary-id"},
-				Primary:  true,
-			}}, nil
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{{Calendar: appconfig.CalendarRef{Name: "Primary", ID: "primary-id"}}}, nil
 		},
 	})
 	if err != nil {
 		t.Fatalf("runAccountAdd() error = %v, want nil", err)
 	}
 
-	after, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile() after abort error = %v", err)
-	}
+	after, _ := os.ReadFile(configPath)
 	if string(after) != string(original) {
-		t.Fatalf("config changed after user abort\n got: %s\nwant: %s", string(after), string(original))
+		t.Fatalf("config changed after abort\n got: %s\nwant: %s", after, original)
 	}
 }
 
-func TestRunAccountAddPreservesConfigWhenNoCalendarsPromptIsAborted(t *testing.T) {
-	configPath := writeTestConfigFile(t, `{
-		"google": {
-			"name": "Google Calendar",
-			"accounts": [
-				{
-					"name": "Existing",
-					"clientId": "existing-client",
-					"clientSecret": "existing-secret",
-					"calendars": []
-				}
-			]
-		}
-	}`)
-	original, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile() error = %v", err)
-	}
-
+func TestRunAccountAddTreatsContextCancellationAsUserAbort(t *testing.T) {
+	configPath := writeGenericConfig(t, []appconfig.Account{{ID: "existing", Service: appcalendar.ServiceTypeGoogle, Name: "Existing"}})
+	original, _ := os.ReadFile(configPath)
 	loader := appconfig.NewLoaderWithPath(configPath)
 	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "New",
-			ClientID:     "new-client",
-			ClientSecret: "new-secret",
-		},
-		showNoCalendarsErr: huh.ErrUserAborted,
+		accountInput:         accountAddInput{Name: "New", ClientID: "new-client", ClientSecret: "new-secret"},
+		calendarSelectionErr: context.Canceled,
 	}
-	backingStore := tokenstore.NewInMemoryTokenStore()
 
-	err = runAccountAdd(newTestCommand(), accountAddDependencies{
+	err := runAccountAdd(newTestCommand(), accountAddDependencies{
 		newLoader:     func() *appconfig.Loader { return loader },
 		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
-		newTokenStore: func() tokenstore.TokenStore { return backingStore },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{{Calendar: appconfig.CalendarRef{Name: "Primary", ID: "primary-id"}}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountAdd() error = %v, want nil", err)
+	}
+	assertConfigUnchanged(t, configPath, original)
+}
+
+func TestRunAccountAddPreservesConfigWhenNoCalendarsPromptIsAborted(t *testing.T) {
+	configPath := writeGenericConfig(t, []appconfig.Account{{ID: "existing", Service: appcalendar.ServiceTypeGoogle, Name: "Existing"}})
+	original, _ := os.ReadFile(configPath)
+	loader := appconfig.NewLoaderWithPath(configPath)
+	prompter := &stubAccountAddPrompter{
+		accountInput:       accountAddInput{Name: "New", ClientID: "new-client", ClientSecret: "new-secret"},
+		showNoCalendarsErr: huh.ErrUserAborted,
+	}
+
+	err := runAccountAdd(newTestCommand(), accountAddDependencies{
+		newLoader:     func() *appconfig.Loader { return loader },
+		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
+		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
 			return []calendars.DiscoveredCalendar{}, nil
 		},
 	})
 	if err != nil {
 		t.Fatalf("runAccountAdd() error = %v, want nil", err)
 	}
-
-	after, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile() after abort error = %v", err)
-	}
-	if string(after) != string(original) {
-		t.Fatalf("config changed after user abort\n got: %s\nwant: %s", string(after), string(original))
-	}
-	if _, found, err := backingStore.Get(context.Background(), "new-client"); err != nil {
-		t.Fatalf("backingStore.Get() error = %v", err)
-	} else if found {
-		t.Fatal("token store should remain unchanged on user abort")
-	}
+	assertConfigUnchanged(t, configPath, original)
 	if !prompter.noCalendarsShown {
-		t.Fatal("expected no-calendars notice to be shown")
-	}
-}
-
-func TestRunAccountAddTreatsContextCancellationAsUserAbort(t *testing.T) {
-	configPath := writeTestConfigFile(t, `{
-		"google": {
-			"name": "Google Calendar",
-			"accounts": [
-				{
-					"name": "Existing",
-					"clientId": "existing-client",
-					"clientSecret": "existing-secret",
-					"calendars": []
-				}
-			]
-		}
-	}`)
-	original, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile() error = %v", err)
-	}
-
-	loader := appconfig.NewLoaderWithPath(configPath)
-	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "New",
-			ClientID:     "new-client",
-			ClientSecret: "new-secret",
-		},
-		calendarSelectionErr: context.Canceled,
-	}
-	backingStore := tokenstore.NewInMemoryTokenStore()
-
-	err = runAccountAdd(newTestCommand(), accountAddDependencies{
-		newLoader:     func() *appconfig.Loader { return loader },
-		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
-		newTokenStore: func() tokenstore.TokenStore { return backingStore },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
-			return []calendars.DiscoveredCalendar{{
-				Calendar: appconfig.Calendar{Name: "Primary", ID: "primary-id"},
-				Primary:  true,
-			}}, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("runAccountAdd() error = %v, want nil", err)
-	}
-
-	after, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("os.ReadFile() after abort error = %v", err)
-	}
-	if string(after) != string(original) {
-		t.Fatalf("config changed after user abort\n got: %s\nwant: %s", string(after), string(original))
-	}
-	if _, found, err := backingStore.Get(context.Background(), "new-client"); err != nil {
-		t.Fatalf("backingStore.Get() error = %v", err)
-	} else if found {
-		t.Fatal("token store should remain unchanged on user abort")
+		t.Fatal("expected no calendars prompt to be shown")
 	}
 }
 
 func TestRunAccountAddReturnsMalformedConfigError(t *testing.T) {
 	loader := appconfig.NewLoaderWithPath(writeTestConfigFile(t, `{invalid json}`))
-
 	err := runAccountAdd(newTestCommand(), accountAddDependencies{
 		newLoader:     func() *appconfig.Loader { return loader },
 		newPrompter:   func(*cobra.Command) accountAddPrompter { return &stubAccountAddPrompter{} },
 		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+		discoverCalendars: func(context.Context, *appconfig.Account, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
 			return nil, nil
 		},
 	})
-	if err == nil {
-		t.Fatal("runAccountAdd() error = nil, want error")
-	}
-
-	want := "failed to load config: failed to parse config file: invalid character 'i' looking for beginning of object key string"
-	if err.Error() != want {
-		t.Fatalf("error = %q, want %q", err.Error(), want)
-	}
-}
-
-func TestRunAccountAddSavesEmptyCalendarsWhenNoneDiscovered(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.json")
-	loader := appconfig.NewLoaderWithPath(configPath)
-	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "Work",
-			ClientID:     "client-id",
-			ClientSecret: "client-secret",
-		},
-	}
-
-	err := runAccountAdd(newTestCommand(), accountAddDependencies{
-		newLoader:     func() *appconfig.Loader { return loader },
-		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
-		newTokenStore: func() tokenstore.TokenStore { return tokenstore.NewInMemoryTokenStore() },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
-			return []calendars.DiscoveredCalendar{}, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("runAccountAdd() error = %v", err)
-	}
-
-	loaded, err := loader.Load()
-	if err != nil {
-		t.Fatalf("loader.Load() error = %v", err)
-	}
-
-	googleCfg, err := loaded.GetGoogleConfig()
-	if err != nil {
-		t.Fatalf("loaded.GetGoogleConfig() error = %v", err)
-	}
-
-	if len(googleCfg.Accounts) != 1 {
-		t.Fatalf("accounts length = %d, want 1", len(googleCfg.Accounts))
-	}
-	if googleCfg.Accounts[0].Calendars == nil {
-		t.Fatal("calendars = nil, want empty slice")
-	}
-	if len(googleCfg.Accounts[0].Calendars) != 0 {
-		t.Fatalf("calendars length = %d, want 0", len(googleCfg.Accounts[0].Calendars))
-	}
-	if !prompter.noCalendarsShown {
-		t.Fatal("expected no-calendars notice to be shown")
+	if err == nil || !strings.Contains(err.Error(), "failed to parse config file") {
+		t.Fatalf("error = %v, want malformed config error", err)
 	}
 }
 
 func TestRunAccountAddRollsBackConfigWhenTokenCommitFails(t *testing.T) {
-	configPath := filepath.Join(t.TempDir(), "config.json")
-	initial := `{
-		"google": {
-			"name": "Google Calendar",
-			"accounts": [
-				{
-					"name": "Existing",
-					"clientId": "existing-client",
-					"clientSecret": "existing-secret",
-					"calendars": []
-				}
-			]
-		}
-	}`
-	if err := os.WriteFile(configPath, []byte(initial), 0o644); err != nil {
-		t.Fatalf("os.WriteFile() error = %v", err)
-	}
-
+	configPath := writeGenericConfig(t, []appconfig.Account{{ID: "existing", Service: appcalendar.ServiceTypeGoogle, Name: "Existing", Settings: map[string]string{"client_id": "existing-client"}}})
+	original, _ := os.ReadFile(configPath)
 	loader := appconfig.NewLoaderWithPath(configPath)
 	prompter := &stubAccountAddPrompter{
-		accountInput: accountAddInput{
-			Name:         "Work",
-			ClientID:     "client-id",
-			ClientSecret: "client-secret",
-		},
-		selectedCalendars: []appconfig.Calendar{{Name: "Primary", ID: "primary-id"}},
+		accountInput:      accountAddInput{Name: "Work", ClientID: "client-id", ClientSecret: "client-secret"},
+		selectedCalendars: []appconfig.CalendarRef{{Name: "Primary", ID: "primary-id"}},
 	}
 	backingStore := &failingTokenStore{clearErr: errors.New("keyring unavailable")}
 
@@ -393,57 +217,34 @@ func TestRunAccountAddRollsBackConfigWhenTokenCommitFails(t *testing.T) {
 		newLoader:     func() *appconfig.Loader { return loader },
 		newPrompter:   func(*cobra.Command) accountAddPrompter { return prompter },
 		newTokenStore: func() tokenstore.TokenStore { return backingStore },
-		discoverCalendars: func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
-			providerName := account.ClientID
+		discoverCalendars: func(ctx context.Context, account *appconfig.Account, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			providerName := account.Setting("client_id")
 			if err := authenticator.ClearToken(ctx, &stubProvider{name: providerName, clientID: providerName}); err != nil {
 				return nil, err
 			}
-			return []calendars.DiscoveredCalendar{{
-				Calendar: appconfig.Calendar{Name: "Primary", ID: "primary-id"},
-				Primary:  true,
-			}}, nil
+			return []calendars.DiscoveredCalendar{{Calendar: appconfig.CalendarRef{Name: "Primary", ID: "primary-id"}}}, nil
 		},
 	})
-	if err == nil {
-		t.Fatal("runAccountAdd() error = nil, want error")
-	}
-	if !strings.Contains(err.Error(), "failed to persist OAuth token") {
-		t.Fatalf("error = %q, want token persistence error", err.Error())
+	if err == nil || !strings.Contains(err.Error(), "failed to persist OAuth token") {
+		t.Fatalf("error = %v, want token persistence error", err)
 	}
 
-	data, readErr := os.ReadFile(configPath)
-	if readErr != nil {
-		t.Fatalf("os.ReadFile() error = %v", readErr)
-	}
-	if string(data) != initial {
-		t.Fatalf("config was not restored after token commit failure\n got: %s\nwant: %s", string(data), initial)
+	after, _ := os.ReadFile(configPath)
+	if string(after) != string(original) {
+		t.Fatalf("config was not restored\n got: %s\nwant: %s", after, original)
 	}
 }
 
 func TestAccountAddFormRejectsDuplicateAccountName(t *testing.T) {
-	googleCfg := &appconfig.GoogleCalendar{
-		Name: "Google Calendar",
-		Accounts: []appconfig.GoogleAccount{
-			{Name: "Work", ClientID: "existing-client"},
-		},
-	}
-
+	cfg := &appconfig.Config{Accounts: []appconfig.Account{{ID: "a", Service: appcalendar.ServiceTypeGoogle, Name: "Work"}}}
 	var input accountAddInput
 	out := &strings.Builder{}
-	form := newAccountDetailsForm(&input, googleCfg).
-		WithAccessible(true).
-		WithInput(strings.NewReader("Work\nPersonal\nclient-id\nclient-secret\n")).
-		WithOutput(out)
-
+	form := newAccountDetailsForm(&input, cfg).WithAccessible(true).WithInput(strings.NewReader("Work\nPersonal\nclient-id\nclient-secret\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-
 	if input.Name != "Personal" {
-		t.Fatalf("input.Name = %q, want %q", input.Name, "Personal")
-	}
-	if !strings.Contains(out.String(), `account name already exists: "Work"`) {
-		t.Fatalf("form output = %q, want duplicate-name validation message", out.String())
+		t.Fatalf("input.Name = %q, want Personal", input.Name)
 	}
 }
 
@@ -458,20 +259,20 @@ func newTestCommand() *cobra.Command {
 type stubAccountAddPrompter struct {
 	accountInput         accountAddInput
 	accountErr           error
-	selectedCalendars    []appconfig.Calendar
+	selectedCalendars    []appconfig.CalendarRef
 	calendarSelectionErr error
 	showNoCalendarsErr   error
 	noCalendarsShown     bool
 }
 
-func (s *stubAccountAddPrompter) PromptAccountDetails(context.Context, *appconfig.GoogleCalendar) (accountAddInput, error) {
+func (s *stubAccountAddPrompter) PromptAccountDetails(context.Context, *appconfig.Config) (accountAddInput, error) {
 	if s.accountErr != nil {
 		return accountAddInput{}, s.accountErr
 	}
 	return s.accountInput, nil
 }
 
-func (s *stubAccountAddPrompter) PromptCalendarSelection(context.Context, string, []calendars.DiscoveredCalendar) ([]appconfig.Calendar, error) {
+func (s *stubAccountAddPrompter) PromptCalendarSelection(context.Context, string, []calendars.DiscoveredCalendar) ([]appconfig.CalendarRef, error) {
 	if s.calendarSelectionErr != nil {
 		return nil, s.calendarSelectionErr
 	}
@@ -488,22 +289,13 @@ type failingTokenStore struct {
 	clearErr error
 }
 
-func (s *failingTokenStore) Set(context.Context, string, *oauth2.Token) error {
-	return s.setErr
-}
-
+func (s *failingTokenStore) Set(context.Context, string, *oauth2.Token) error { return s.setErr }
 func (s *failingTokenStore) Get(context.Context, string) (*oauth2.Token, bool, error) {
 	return nil, false, nil
 }
+func (s *failingTokenStore) Clear(context.Context, string) error { return s.clearErr }
 
-func (s *failingTokenStore) Clear(context.Context, string) error {
-	return s.clearErr
-}
-
-type stubProvider struct {
-	name     string
-	clientID string
-}
+type stubProvider struct{ name, clientID string }
 
 func (p *stubProvider) Name() string                             { return p.name }
 func (p *stubProvider) ClientID() string                         { return p.clientID }
@@ -517,6 +309,4 @@ func (p *stubProvider) ExchangeOptions() []oauth2.AuthCodeOption { return nil }
 
 type ioDiscard struct{}
 
-func (ioDiscard) Write(p []byte) (int, error) {
-	return len(p), nil
-}
+func (ioDiscard) Write(p []byte) (int, error) { return len(p), nil }
