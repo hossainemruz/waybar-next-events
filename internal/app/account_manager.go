@@ -145,7 +145,7 @@ func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountI
 		Settings:  cloneStringMap(input.Settings),
 		Calendars: cloneCalendarRefs(original.Calendars),
 	}
-	mergedSecrets := mergeSecrets(originalSecrets, input.Secrets, secretKeys)
+	mergedSecrets := mergeSecrets(originalSecrets, input.Secrets, service.AccountFields())
 
 	stagedSecrets := secrets.NewStagedStore()
 	if err := stageSecrets(ctx, stagedSecrets, updated.ID, service.AccountFields(), mergedSecrets); err != nil {
@@ -397,13 +397,20 @@ func seedStagedTokenStore(ctx context.Context, stagedStore *tokenstore.StagedTok
 }
 
 func stageSecrets(ctx context.Context, staged *secrets.StagedStore, accountID string, fields []calendar.AccountField, values map[string]string) error {
-	for _, key := range secretFieldKeys(fields) {
-		value, ok := values[key]
-		if !ok {
-			return fmt.Errorf("missing account secret %q", key)
+	for _, field := range fields {
+		if !field.Secret {
+			continue
 		}
-		if err := staged.Set(ctx, accountID, key, strings.TrimSpace(value)); err != nil {
-			return fmt.Errorf("stage account secret %q: %w", key, err)
+
+		value, ok := values[field.Key]
+		if !ok {
+			if !field.Required {
+				continue
+			}
+			return fmt.Errorf("missing account secret %q", field.Key)
+		}
+		if err := staged.Set(ctx, accountID, field.Key, strings.TrimSpace(value)); err != nil {
+			return fmt.Errorf("stage account secret %q: %w", field.Key, err)
 		}
 	}
 
@@ -485,16 +492,25 @@ func credentialsChanged(original *calendar.Account, originalSecrets map[string]s
 	return false
 }
 
-func mergeSecrets(existing map[string]secretSnapshot, updated map[string]string, keys []string) map[string]string {
-	merged := make(map[string]string, len(keys))
-	for _, key := range keys {
-		if value, ok := updated[key]; ok {
-			merged[key] = strings.TrimSpace(value)
+func mergeSecrets(existing map[string]secretSnapshot, updated map[string]string, fields []calendar.AccountField) map[string]string {
+	merged := make(map[string]string, len(fields))
+	for _, field := range fields {
+		if !field.Secret {
 			continue
 		}
 
-		if stored, ok := existing[key]; ok && stored.found {
-			merged[key] = stored.value
+		if value, ok := updated[field.Key]; ok {
+			merged[field.Key] = strings.TrimSpace(value)
+			continue
+		}
+
+		if stored, ok := existing[field.Key]; ok && stored.found {
+			merged[field.Key] = stored.value
+			continue
+		}
+
+		if !field.Required {
+			merged[field.Key] = ""
 		}
 	}
 

@@ -44,22 +44,12 @@ func runList(cmd *cobra.Command, deps listDependencies) error {
 		return err
 	}
 	data := types.Result{
-		Events: calendarsToLegacyEvents(events),
+		Events: events,
 	}
 	if err := data.Print(); err != nil {
 		fmt.Printf("{\"text\": \" Something went wrong!\", \"tooltip\": \"%s\"}\n", err)
 	}
 	return nil
-}
-
-func calendarsToLegacyEvents(events []calendar.Event) []types.Event {
-	if len(events) == 0 {
-		return []types.Event{}
-	}
-
-	legacy := make([]types.Event, len(events))
-	copy(legacy, events)
-	return legacy
 }
 
 func init() {

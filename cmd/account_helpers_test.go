@@ -28,13 +28,13 @@ func TestHasNoAccounts(t *testing.T) {
 	}
 
 	cfg := &appconfig.Config{Accounts: []appconfig.Account{{ID: "a", Service: appcalendar.ServiceType("outlook"), Name: "Mail"}}}
-	if !hasNoAccounts(cfg) {
-		t.Fatal("hasNoAccounts(no google accounts) = false, want true")
+	if hasNoAccounts(cfg) {
+		t.Fatal("hasNoAccounts(with non-google account) = true, want false")
 	}
 
 	cfg.Accounts = append(cfg.Accounts, appconfig.Account{ID: "b", Service: appcalendar.ServiceTypeGoogle, Name: "Work"})
 	if hasNoAccounts(cfg) {
-		t.Fatal("hasNoAccounts(with google account) = true, want false")
+		t.Fatal("hasNoAccounts(with accounts) = true, want false")
 	}
 }
 
@@ -52,14 +52,14 @@ func TestEnsureAccountNameAvailable(t *testing.T) {
 }
 
 func TestFindAccountByIDUsesID(t *testing.T) {
-	cfg := &appconfig.Config{Accounts: []appconfig.Account{{ID: "google-1", Service: appcalendar.ServiceTypeGoogle, Name: "Work"}}}
+	cfg := &appconfig.Config{Accounts: []appconfig.Account{{ID: "other-1", Service: appcalendar.ServiceType("outlook"), Name: "Mail"}}}
 
-	account, err := findAccountByID(cfg, "google-1")
+	account, err := findAccountByID(cfg, "other-1")
 	if err != nil {
 		t.Fatalf("findAccountByID() error = %v", err)
 	}
-	if account.Name != "Work" {
-		t.Fatalf("account.Name = %q, want Work", account.Name)
+	if account.Name != "Mail" {
+		t.Fatalf("account.Name = %q, want Mail", account.Name)
 	}
 }
 
@@ -71,13 +71,16 @@ func TestAccountSelectionOptionsUseStableIDs(t *testing.T) {
 	}}
 
 	options := accountSelectionOptions(cfg)
-	if len(options) != 2 {
-		t.Fatalf("len(options) = %d, want 2", len(options))
+	if len(options) != 3 {
+		t.Fatalf("len(options) = %d, want 3", len(options))
 	}
 	if options[0].Value != "google-2" {
 		t.Fatalf("options[0].Value = %q, want google-2", options[0].Value)
 	}
-	if options[1].Key != "Account 2" || options[1].Value != "google-1" {
-		t.Fatalf("options[1] = (%q, %q), want (Account 2, google-1)", options[1].Key, options[1].Value)
+	if options[1].Key != "Mail" || options[1].Value != "other-1" {
+		t.Fatalf("options[1] = (%q, %q), want (Mail, other-1)", options[1].Key, options[1].Value)
+	}
+	if options[2].Key != "Account 3" || options[2].Value != "google-1" {
+		t.Fatalf("options[2] = (%q, %q), want (Account 3, google-1)", options[2].Key, options[2].Value)
 	}
 }

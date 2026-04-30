@@ -338,6 +338,55 @@ func TestAccountManagerUpdateAccountMergesExistingSecretsForPartialUpdate(t *tes
 	}
 }
 
+func TestStageSecretsAllowsMissingOptionalSecret(t *testing.T) {
+	staged := secrets.NewStagedStore()
+	fields := []calendar.AccountField{
+		{Key: "required_secret", Secret: true, Required: true},
+		{Key: "optional_secret", Secret: true, Required: false},
+	}
+
+	err := stageSecrets(context.Background(), staged, "work-id", fields, map[string]string{"required_secret": "required-value"})
+	if err != nil {
+		t.Fatalf("stageSecrets() error = %v", err)
+	}
+
+	requiredValue, err := staged.Get(context.Background(), "work-id", "required_secret")
+	if err != nil {
+		t.Fatalf("Get(required_secret) error = %v", err)
+	}
+	if requiredValue != "required-value" {
+		t.Fatalf("requiredValue = %q, want required-value", requiredValue)
+	}
+
+	if _, err := staged.Get(context.Background(), "work-id", "optional_secret"); !errors.Is(err, secrets.ErrSecretNotFound) {
+		t.Fatalf("Get(optional_secret) error = %v, want ErrSecretNotFound", err)
+	}
+}
+
+func TestMergeSecretsIncludesEmptyOptionalSecretPlaceholder(t *testing.T) {
+	fields := []calendar.AccountField{
+		{Key: "required_secret", Secret: true, Required: true},
+		{Key: "optional_secret", Secret: true, Required: false},
+	}
+
+	merged := mergeSecrets(
+		map[string]secretSnapshot{"required_secret": {value: "stored-required", found: true}},
+		map[string]string{},
+		fields,
+	)
+
+	if merged["required_secret"] != "stored-required" {
+		t.Fatalf("merged[required_secret] = %q, want stored-required", merged["required_secret"])
+	}
+	value, ok := merged["optional_secret"]
+	if !ok {
+		t.Fatal("merged does not include optional_secret placeholder")
+	}
+	if value != "" {
+		t.Fatalf("merged[optional_secret] = %q, want empty string", value)
+	}
+}
+
 func TestAccountManagerDeleteAccountRemovesConfigSecretsAndToken(t *testing.T) {
 	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}})
 	secretStore := secrets.NewInMemoryStore()

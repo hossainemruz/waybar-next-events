@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -122,10 +121,6 @@ func (s *Service) FetchEvents(ctx context.Context, account calendar.Account, que
 		}
 		events = append(events, converted...)
 	}
-
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].Start.Before(events[j].Start)
-	})
 
 	return events, nil
 }

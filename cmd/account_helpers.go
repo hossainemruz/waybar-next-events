@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
@@ -28,7 +27,7 @@ func loadConfigOrEmpty(loader *appconfig.Loader) (*appconfig.Config, error) {
 }
 
 func hasNoAccounts(cfg *appconfig.Config) bool {
-	return cfg == nil || len(cfg.AccountsByService(calendar.ServiceTypeGoogle)) == 0
+	return cfg == nil || len(cfg.Accounts) == 0
 }
 
 func ensureHasAccounts(cfg *appconfig.Config) error {
@@ -61,7 +60,7 @@ func findAccountByID(cfg *appconfig.Config, id string) (*appconfig.Account, erro
 	}
 
 	account := cfg.FindAccountByID(id)
-	if account == nil || account.Service != calendar.ServiceTypeGoogle {
+	if account == nil {
 		return nil, fmt.Errorf("%w: %q", appconfig.ErrAccountNotFound, id)
 	}
 
@@ -73,7 +72,7 @@ func accountSelectionOptions(cfg *appconfig.Config) []huh.Option[string] {
 		return nil
 	}
 
-	accounts := cfg.AccountsByService(calendar.ServiceTypeGoogle)
+	accounts := cfg.Accounts
 	options := make([]huh.Option[string], 0, len(accounts))
 	for i, account := range accounts {
 		options = append(options, huh.NewOption(accountSelectionLabel(account, i), account.ID))
@@ -83,7 +82,7 @@ func accountSelectionOptions(cfg *appconfig.Config) []huh.Option[string] {
 }
 
 func promptAccountSelection(ctx context.Context, prompter *huhAccountAddPrompter, cfg *appconfig.Config, title string) (string, error) {
-	accounts := cfg.AccountsByService(calendar.ServiceTypeGoogle)
+	accounts := cfg.Accounts
 	selectedAccountID := accounts[0].ID
 
 	form := prompter.configureForm(
