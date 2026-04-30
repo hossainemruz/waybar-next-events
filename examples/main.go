@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
 	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"google.golang.org/api/calendar/v3"
 )
 
@@ -44,6 +44,7 @@ func main() {
 
 		// Create Google OAuth2 provider for this account
 		googleProvider := providers.NewGoogle(
+			account.ID,
 			account.Setting("client_id"),
 			clientSecret,
 			[]string{calendar.CalendarReadonlyScope},

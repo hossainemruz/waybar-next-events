@@ -9,15 +9,14 @@ import (
 	"testing"
 
 	"charm.land/huh/v2"
-	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
-
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
+	"github.com/spf13/cobra"
+	"golang.org/x/oauth2"
 )
 
 func TestRunAccountAddCreatesConfigOnFirstRun(t *testing.T) {
@@ -244,7 +243,7 @@ func TestRunAccountAddRollsBackConfigWhenTokenCommitFails(t *testing.T) {
 		newSecretStore: func() secrets.Store { return secretStore },
 		newTokenStore:  func() tokenstore.TokenStore { return backingStore },
 		discoverCalendars: func(ctx context.Context, account *appconfig.Account, secretStore secrets.Store, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
-			providerName := account.Setting("client_id")
+			providerName := tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), account.ID)
 			if err := authenticator.ClearToken(ctx, &stubProvider{name: providerName, clientID: providerName}); err != nil {
 				return nil, err
 			}

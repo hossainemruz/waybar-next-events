@@ -9,14 +9,13 @@ import (
 	"time"
 
 	"charm.land/huh/v2"
-	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/spf13/cobra"
-
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
+	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 )
 
@@ -140,7 +139,7 @@ func TestRunAccountUpdateReusesExistingTokenWhenCredentialsUnchanged(t *testing.
 	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "work-secret")
 	backingStore := tokenstore.NewInMemoryTokenStore()
 	existingToken := &oauth2.Token{AccessToken: "existing-token", RefreshToken: "refresh-token", Expiry: time.Now().Add(time.Hour)}
-	if err := backingStore.Set(context.Background(), "work-client", existingToken); err != nil {
+	if err := backingStore.Set(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id"), existingToken); err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
 	prompter := &stubAccountUpdatePrompter{selectedAccountID: "work-id", updatedInput: accountUpdateInput{Name: "Work", ClientID: "work-client", ClientSecret: "work-secret"}}
@@ -171,6 +170,54 @@ func TestRunAccountUpdateReusesExistingTokenWhenCredentialsUnchanged(t *testing.
 	})
 	if err != nil {
 		t.Fatalf("runAccountUpdate() error = %v", err)
+	}
+}
+
+func TestRunAccountUpdateRenamePreservesExistingToken(t *testing.T) {
+	configPath := writeGenericConfig(t, []appconfig.Account{{ID: "work-id", Service: appcalendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "work-client"}}})
+	loader := appconfig.NewLoaderWithPath(configPath)
+	secretStore := secrets.NewInMemoryStore()
+	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "work-secret")
+	backingStore := tokenstore.NewInMemoryTokenStore()
+	tokenKey := tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id")
+	existingToken := &oauth2.Token{AccessToken: "existing-token", RefreshToken: "refresh-token", Expiry: time.Now().Add(time.Hour)}
+	if err := backingStore.Set(context.Background(), tokenKey, existingToken); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+	prompter := &stubAccountUpdatePrompter{selectedAccountID: "work-id", updatedInput: accountUpdateInput{Name: "Work Renamed", ClientID: "work-client", ClientSecret: "work-secret"}}
+
+	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+		newLoader:      func() *appconfig.Loader { return loader },
+		newPrompter:    func(*cobra.Command) accountUpdatePrompter { return prompter },
+		newSecretStore: func() secrets.Store { return secretStore },
+		newTokenStore:  func() tokenstore.TokenStore { return backingStore },
+		clearToken: func(context.Context, *auth.Authenticator, secrets.Store, *appconfig.Account) error {
+			t.Fatal("clearToken should not be called")
+			return nil
+		},
+		discoverCalendars: func(context.Context, *appconfig.Account, secrets.Store, *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			return []calendars.DiscoveredCalendar{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountUpdate() error = %v", err)
+	}
+
+	loaded, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	renamed := loaded.FindAccountByID("work-id")
+	if renamed == nil || renamed.Name != "Work Renamed" {
+		t.Fatalf("renamed account = %+v, want renamed account", renamed)
+	}
+
+	storedToken, found, err := backingStore.Get(context.Background(), tokenKey)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !found || storedToken == nil || storedToken.AccessToken != "existing-token" {
+		t.Fatalf("stored token = %+v, found=%v, want preserved token", storedToken, found)
 	}
 }
 
@@ -266,6 +313,106 @@ func TestRunAccountUpdateReturnsMissingSecretError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing stored secret") {
 		t.Fatalf("error = %v, want missing stored secret error", err)
+	}
+}
+
+func TestGoogleTokenKeyUsesStableAccountIdentity(t *testing.T) {
+	account := &appconfig.Account{ID: "account-id", Service: appcalendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "shared-client"}}
+
+	got, err := googleTokenKey(account)
+	if err != nil {
+		t.Fatalf("googleTokenKey() error = %v", err)
+	}
+
+	if got != "google/account-id" {
+		t.Fatalf("googleTokenKey() = %q, want %q", got, "google/account-id")
+	}
+}
+
+func TestSeedStagedTokenStoreUsesStableAccountIdentity(t *testing.T) {
+	ctx := context.Background()
+	stagedStore := tokenstore.NewStagedTokenStore()
+	backingStore := tokenstore.NewInMemoryTokenStore()
+	account := &appconfig.Account{ID: "account-id", Service: appcalendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "shared-client"}}
+	existingToken := &oauth2.Token{AccessToken: "existing-token", Expiry: time.Now().Add(time.Hour)}
+	if err := backingStore.Set(ctx, tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), account.ID), existingToken); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	if err := seedStagedTokenStore(ctx, stagedStore, backingStore, account); err != nil {
+		t.Fatalf("seedStagedTokenStore() error = %v", err)
+	}
+
+	stagedToken, found, err := stagedStore.Get(ctx, tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), account.ID))
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if !found || stagedToken == nil || stagedToken.AccessToken != "existing-token" {
+		t.Fatalf("staged token = %+v, found=%v, want existing token", stagedToken, found)
+	}
+}
+
+func TestRunAccountUpdateKeepsSeparateTokensForSharedClientID(t *testing.T) {
+	configPath := writeGenericConfig(t, []appconfig.Account{
+		{ID: "work-id", Service: appcalendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "shared-client"}},
+		{ID: "personal-id", Service: appcalendar.ServiceTypeGoogle, Name: "Personal", Settings: map[string]string{"client_id": "shared-client"}},
+	})
+	loader := appconfig.NewLoaderWithPath(configPath)
+	secretStore := secrets.NewInMemoryStore()
+	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "work-secret")
+	_ = secretStore.Set(context.Background(), "personal-id", googleClientSecretKey, "personal-secret")
+	backingStore := tokenstore.NewInMemoryTokenStore()
+	workKey := tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id")
+	personalKey := tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "personal-id")
+	if err := backingStore.Set(context.Background(), workKey, &oauth2.Token{AccessToken: "work-token", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("Set(work) error = %v", err)
+	}
+	if err := backingStore.Set(context.Background(), personalKey, &oauth2.Token{AccessToken: "personal-token", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatalf("Set(personal) error = %v", err)
+	}
+	prompter := &stubAccountUpdatePrompter{selectedAccountID: "personal-id", updatedInput: accountUpdateInput{Name: "Personal Updated", ClientID: "shared-client", ClientSecret: "personal-secret"}}
+
+	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+		newLoader:      func() *appconfig.Loader { return loader },
+		newPrompter:    func(*cobra.Command) accountUpdatePrompter { return prompter },
+		newSecretStore: func() secrets.Store { return secretStore },
+		newTokenStore:  func() tokenstore.TokenStore { return backingStore },
+		clearToken: func(context.Context, *auth.Authenticator, secrets.Store, *appconfig.Account) error {
+			t.Fatal("clearToken should not be called")
+			return nil
+		},
+		discoverCalendars: func(ctx context.Context, account *appconfig.Account, secretStore secrets.Store, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error) {
+			provider, err := calendars.GoogleProviderForAccount(ctx, account, secretStore)
+			if err != nil {
+				return nil, err
+			}
+			token, err := authenticator.Authenticate(ctx, provider)
+			if err != nil {
+				return nil, err
+			}
+			if token.AccessToken != "personal-token" {
+				t.Fatalf("Authenticate() token = %q, want %q", token.AccessToken, "personal-token")
+			}
+			return []calendars.DiscoveredCalendar{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountUpdate() error = %v", err)
+	}
+
+	workToken, found, err := backingStore.Get(context.Background(), workKey)
+	if err != nil {
+		t.Fatalf("Get(work) error = %v", err)
+	}
+	if !found || workToken == nil || workToken.AccessToken != "work-token" {
+		t.Fatalf("work token = %+v, found=%v, want preserved work token", workToken, found)
+	}
+	personalToken, found, err := backingStore.Get(context.Background(), personalKey)
+	if err != nil {
+		t.Fatalf("Get(personal) error = %v", err)
+	}
+	if !found || personalToken == nil || personalToken.AccessToken != "personal-token" {
+		t.Fatalf("personal token = %+v, found=%v, want preserved personal token", personalToken, found)
 	}
 }
 

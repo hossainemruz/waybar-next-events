@@ -2,6 +2,7 @@
 package providers
 
 import (
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"golang.org/x/oauth2"
 	"google.golang.org/api/calendar/v3"
@@ -17,6 +18,7 @@ const (
 // Google implements the auth.Provider interface for Google OAuth2.
 // It supports Google Calendar and other Google APIs.
 type Google struct {
+	accountID    string
 	clientID     string
 	clientSecret string
 	scopes       []string
@@ -25,11 +27,12 @@ type Google struct {
 // NewGoogle creates a new Google OAuth2 provider.
 // clientID is required. clientSecret may be empty for public clients.
 // If scopes is empty, default calendar read-only scope is used.
-func NewGoogle(clientID, clientSecret string, scopes []string) *Google {
+func NewGoogle(accountID, clientID, clientSecret string, scopes []string) *Google {
 	if len(scopes) == 0 {
 		scopes = []string{calendar.CalendarReadonlyScope}
 	}
 	return &Google{
+		accountID:    accountID,
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		scopes:       scopes,
@@ -37,10 +40,10 @@ func NewGoogle(clientID, clientSecret string, scopes []string) *Google {
 }
 
 // Name returns a unique identifier for the provider.
-// The clientId is used as the identity so that each Google account gets
-// its own token storage key, ensuring independent OAuth sessions per account.
+// Tokens are keyed by stable service/account identity so account renames and
+// shared OAuth apps cannot collide.
 func (g *Google) Name() string {
-	return g.clientID
+	return tokenstore.TokenKey("google", g.accountID)
 }
 
 // ClientID returns the OAuth2 client ID.

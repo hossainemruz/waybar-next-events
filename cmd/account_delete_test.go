@@ -8,14 +8,13 @@ import (
 	"testing"
 
 	"charm.land/huh/v2"
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
+	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
+	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
-
-	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
-	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
 )
 
 func TestRunAccountDeleteRemovesSelectedAccount(t *testing.T) {
@@ -160,7 +159,7 @@ func TestRunAccountDeleteLeavesConfigAndTokensUnchangedOnCancellation(t *testing
 	backingStore := tokenstore.NewInMemoryTokenStore()
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "work-secret")
-	if err := backingStore.Set(context.Background(), "work-client", &oauth2.Token{AccessToken: "work-token"}); err != nil {
+	if err := backingStore.Set(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id"), &oauth2.Token{AccessToken: "work-token"}); err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
 
@@ -180,7 +179,7 @@ func TestRunAccountDeleteLeavesConfigAndTokensUnchangedOnCancellation(t *testing
 		t.Fatalf("runAccountDelete() error = %v, want nil", err)
 	}
 	assertConfigUnchanged(t, configPath, original)
-	token, found, err := backingStore.Get(context.Background(), "work-client")
+	token, found, err := backingStore.Get(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id"))
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
@@ -200,11 +199,11 @@ func TestRunAccountDeleteClearsOnlyDeletedAccountToken(t *testing.T) {
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "work-secret")
 	_ = secretStore.Set(context.Background(), "personal-id", googleClientSecretKey, "personal-secret")
-	if err := backingStore.Set(context.Background(), "work-client", &oauth2.Token{AccessToken: "work-token"}); err != nil {
-		t.Fatalf("Set(work-client) error = %v", err)
+	if err := backingStore.Set(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id"), &oauth2.Token{AccessToken: "work-token"}); err != nil {
+		t.Fatalf("Set(work token) error = %v", err)
 	}
-	if err := backingStore.Set(context.Background(), "personal-client", &oauth2.Token{AccessToken: "personal-token"}); err != nil {
-		t.Fatalf("Set(personal-client) error = %v", err)
+	if err := backingStore.Set(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "personal-id"), &oauth2.Token{AccessToken: "personal-token"}); err != nil {
+		t.Fatalf("Set(personal token) error = %v", err)
 	}
 
 	err := runAccountDelete(newTestCommand(), accountDeleteDependencies{
@@ -217,16 +216,16 @@ func TestRunAccountDeleteClearsOnlyDeletedAccountToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runAccountDelete() error = %v", err)
 	}
-	workToken, found, err := backingStore.Get(context.Background(), "work-client")
+	workToken, found, err := backingStore.Get(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id"))
 	if err != nil {
-		t.Fatalf("Get(work-client) error = %v", err)
+		t.Fatalf("Get(work token) error = %v", err)
 	}
 	if !found || workToken == nil || workToken.AccessToken != "work-token" {
 		t.Fatalf("work token = %+v, found=%v, want preserved token", workToken, found)
 	}
-	personalToken, found, err := backingStore.Get(context.Background(), "personal-client")
+	personalToken, found, err := backingStore.Get(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "personal-id"))
 	if err != nil {
-		t.Fatalf("Get(personal-client) error = %v", err)
+		t.Fatalf("Get(personal token) error = %v", err)
 	}
 	if found || personalToken != nil {
 		t.Fatalf("personal token = %+v, found=%v, want cleared token", personalToken, found)

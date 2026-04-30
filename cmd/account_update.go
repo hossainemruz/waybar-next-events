@@ -7,12 +7,11 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
@@ -230,12 +229,12 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 }
 
 func seedStagedTokenStore(ctx context.Context, stagedStore *tokenstore.StagedTokenStore, backingStore tokenstore.TokenStore, account *appconfig.Account) error {
-	providerName, err := googleProviderName(account)
+	tokenKey, err := googleTokenKey(account)
 	if err != nil {
 		return err
 	}
 
-	token, found, err := backingStore.Get(ctx, providerName)
+	token, found, err := backingStore.Get(ctx, tokenKey)
 	if err != nil {
 		return fmt.Errorf("failed to load existing OAuth token for account %q: %w", account.Name, err)
 	}
@@ -243,22 +242,22 @@ func seedStagedTokenStore(ctx context.Context, stagedStore *tokenstore.StagedTok
 		return nil
 	}
 
-	if err := stagedStore.Set(ctx, providerName, token); err != nil {
+	if err := stagedStore.Set(ctx, tokenKey, token); err != nil {
 		return fmt.Errorf("failed to stage existing OAuth token for account %q: %w", account.Name, err)
 	}
 
 	return nil
 }
 
-func googleProviderName(account *appconfig.Account) (string, error) {
+func googleTokenKey(account *appconfig.Account) (string, error) {
 	if account == nil {
 		return "", fmt.Errorf("account cannot be nil")
 	}
+	if strings.TrimSpace(account.ID) == "" {
+		return "", fmt.Errorf("account ID cannot be empty")
+	}
 
-	// TODO(subtask-5): stop deriving token keys from client_id and use stable
-	// service/accountID token identity instead.
-	provider := providers.NewGoogle(account.Setting("client_id"), "", nil)
-	return provider.Name(), nil
+	return tokenstore.TokenKey(string(calendar.ServiceTypeGoogle), account.ID), nil
 }
 
 type huhAccountUpdatePrompter struct {

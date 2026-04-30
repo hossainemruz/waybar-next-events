@@ -8,14 +8,13 @@ import (
 	"testing"
 
 	"charm.land/huh/v2"
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
+	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
+	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
-
-	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
-	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
 )
 
 func TestRunAccountLoginLogsIntoSelectedAccount(t *testing.T) {
@@ -48,7 +47,7 @@ func TestRunAccountLoginLogsIntoSelectedAccount(t *testing.T) {
 			if secretValue != "personal-secret" {
 				return errors.New("unexpected secret value")
 			}
-			return backingStore.Set(ctx, account.Setting("client_id"), &oauth2.Token{AccessToken: "new-token"})
+			return backingStore.Set(ctx, tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), account.ID), &oauth2.Token{AccessToken: "new-token"})
 		},
 	})
 	if err != nil {
@@ -80,7 +79,7 @@ func TestRunAccountLoginPreservesConfigOnUserAbort(t *testing.T) {
 	backingStore := tokenstore.NewInMemoryTokenStore()
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "work-secret")
-	_ = backingStore.Set(context.Background(), "work-client", &oauth2.Token{AccessToken: "existing-token"})
+	_ = backingStore.Set(context.Background(), tokenstore.TokenKey(string(appcalendar.ServiceTypeGoogle), "work-id"), &oauth2.Token{AccessToken: "existing-token"})
 
 	err := runAccountLogin(newTestCommand(), accountLoginDependencies{
 		newLoader: func() *appconfig.Loader { return loader },

@@ -228,16 +228,16 @@ type failingCommitTokenStore struct {
 	clearErrors map[string]error
 }
 
-func (s *failingCommitTokenStore) Set(ctx context.Context, providerName string, token *oauth2.Token) error {
-	if err, ok := s.setErrors[providerName]; ok {
+func (s *failingCommitTokenStore) Set(ctx context.Context, tokenKey string, token *oauth2.Token) error {
+	if err, ok := s.setErrors[tokenKey]; ok {
 		return err
 	}
-	return s.TokenStore.Set(ctx, providerName, token)
+	return s.TokenStore.Set(ctx, tokenKey, token)
 }
 
-func (s *failingCommitTokenStore) Clear(ctx context.Context, providerName string) error {
-	if err, ok := s.clearErrors[providerName]; ok {
+func (s *failingCommitTokenStore) Clear(ctx context.Context, tokenKey string) error {
+	if err, ok := s.clearErrors[tokenKey]; ok {
 		return err
 	}
-	return s.TokenStore.Clear(ctx, providerName)
+	return s.TokenStore.Clear(ctx, tokenKey)
 }

@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
 	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/pkg/types"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
@@ -78,6 +79,13 @@ type DiscoveredCalendar struct {
 // GoogleProviderForAccount builds a Google auth provider using non-secret
 // account settings plus secrets loaded from the configured secret store.
 func GoogleProviderForAccount(ctx context.Context, account *config.Account, secretStore secrets.Store) (*providers.Google, error) {
+	if account == nil {
+		return nil, fmt.Errorf("account cannot be nil")
+	}
+	if strings.TrimSpace(account.ID) == "" {
+		return nil, fmt.Errorf("account ID cannot be empty")
+	}
+
 	clientSecret, err := secretStore.Get(ctx, account.ID, "client_secret")
 	if err != nil {
 		if errors.Is(err, secrets.ErrSecretNotFound) {
@@ -87,6 +95,7 @@ func GoogleProviderForAccount(ctx context.Context, account *config.Account, secr
 	}
 
 	return providers.NewGoogle(
+		account.ID,
 		account.Setting("client_id"),
 		clientSecret,
 		[]string{calendar.CalendarReadonlyScope},

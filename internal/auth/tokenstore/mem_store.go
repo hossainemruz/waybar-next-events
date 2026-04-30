@@ -2,6 +2,7 @@ package tokenstore
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"golang.org/x/oauth2"
@@ -21,30 +22,45 @@ func NewInMemoryTokenStore() *InMemoryTokenStore {
 	}
 }
 
-// Set stores the token for the given provider.
-func (s *InMemoryTokenStore) Set(ctx context.Context, providerName string, token *oauth2.Token) error {
+// Set stores the token for the given token key.
+func (s *InMemoryTokenStore) Set(ctx context.Context, tokenKey string, token *oauth2.Token) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.tokens[providerName] = cloneToken(token)
+	if err := validateTokenKey(tokenKey); err != nil {
+		return err
+	}
+	if token == nil {
+		return fmt.Errorf("token cannot be nil")
+	}
+
+	s.tokens[tokenKey] = cloneToken(token)
 	return nil
 }
 
-// Get retrieves the token for the given provider.
-func (s *InMemoryTokenStore) Get(ctx context.Context, providerName string) (*oauth2.Token, bool, error) {
+// Get retrieves the token for the given token key.
+func (s *InMemoryTokenStore) Get(ctx context.Context, tokenKey string) (*oauth2.Token, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	token, ok := s.tokens[providerName]
+	if err := validateTokenKey(tokenKey); err != nil {
+		return nil, false, err
+	}
+
+	token, ok := s.tokens[tokenKey]
 	return cloneToken(token), ok, nil
 }
 
-// Clear removes the token for the given provider.
-func (s *InMemoryTokenStore) Clear(ctx context.Context, providerName string) error {
+// Clear removes the token for the given token key.
+func (s *InMemoryTokenStore) Clear(ctx context.Context, tokenKey string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.tokens, providerName)
+	if err := validateTokenKey(tokenKey); err != nil {
+		return err
+	}
+
+	delete(s.tokens, tokenKey)
 	return nil
 }
 
@@ -54,8 +70,8 @@ func (s *InMemoryTokenStore) Snapshot() map[string]*oauth2.Token {
 	defer s.mu.RUnlock()
 
 	snapshot := make(map[string]*oauth2.Token, len(s.tokens))
-	for providerName, token := range s.tokens {
-		snapshot[providerName] = cloneToken(token)
+	for tokenKey, token := range s.tokens {
+		snapshot[tokenKey] = cloneToken(token)
 	}
 
 	return snapshot

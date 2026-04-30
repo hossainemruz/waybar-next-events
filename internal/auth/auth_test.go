@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
 	"golang.org/x/oauth2"
 )
 

@@ -12,6 +12,12 @@ func TestInMemoryTokenStore(t *testing.T) {
 	ctx := context.Background()
 	store := NewInMemoryTokenStore()
 
+	t.Run("TokenKey", func(t *testing.T) {
+		if got := TokenKey("google", "account-id"); got != "google/account-id" {
+			t.Fatalf("TokenKey() = %q, want %q", got, "google/account-id")
+		}
+	})
+
 	t.Run("Get_NotFound", func(t *testing.T) {
 		token, found, err := store.Get(ctx, "nonexistent")
 		if err != nil {
@@ -53,6 +59,34 @@ func TestInMemoryTokenStore(t *testing.T) {
 		}
 		if retrieved.RefreshToken != token.RefreshToken {
 			t.Errorf("Get() RefreshToken = %s, want %s", retrieved.RefreshToken, token.RefreshToken)
+		}
+	})
+
+	t.Run("Set_NilToken", func(t *testing.T) {
+		err := store.Set(ctx, "nil-token-provider", nil)
+		if err == nil {
+			t.Fatal("Set() error = nil, want error")
+		}
+	})
+
+	t.Run("Set_EmptyKey", func(t *testing.T) {
+		err := store.Set(ctx, "", &oauth2.Token{AccessToken: "token"})
+		if err == nil {
+			t.Fatal("Set() error = nil, want error")
+		}
+	})
+
+	t.Run("Get_EmptyKey", func(t *testing.T) {
+		_, _, err := store.Get(ctx, "")
+		if err == nil {
+			t.Fatal("Get() error = nil, want error")
+		}
+	})
+
+	t.Run("Clear_EmptyKey", func(t *testing.T) {
+		err := store.Clear(ctx, "")
+		if err == nil {
+			t.Fatal("Clear() error = nil, want error")
 		}
 	})
 
