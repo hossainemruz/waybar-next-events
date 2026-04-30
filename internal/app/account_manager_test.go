@@ -227,7 +227,11 @@ type stubAppService struct {
 }
 
 func (s *stubAppService) Type() calendar.ServiceType             { return s.serviceType }
+func (s *stubAppService) DisplayName() string                    { return string(s.serviceType) }
 func (s *stubAppService) AccountFields() []calendar.AccountField { return s.fields }
+func (s *stubAppService) AuthProvider(account calendar.Account) (calendar.AuthProvider, error) {
+	return &stubProvider{name: tokenstore.TokenKey(string(s.serviceType), account.ID)}, nil
+}
 func (s *stubAppService) Provider(_ context.Context, account calendar.Account, _ secrets.Store) (providers.Provider, error) {
 	if s.providerErr != nil {
 		return nil, s.providerErr
@@ -322,9 +326,9 @@ func cloneMap(values map[string]string) map[string]string {
 	return cloned
 }
 
-func newTestAccountManager(loader ConfigLoader, secretStore secrets.Store, tokenStore tokenstore.TokenStore, service Service) *AccountManager {
-	registry, err := NewRegistry(service)
-	if err != nil {
+func newTestAccountManager(loader ConfigLoader, secretStore secrets.Store, tokenStore tokenstore.TokenStore, service calendar.Service) *AccountManager {
+	registry := calendar.NewRegistry()
+	if err := registry.Register(service); err != nil {
 		panic(err)
 	}
 	manager := NewAccountManager(loader, registry, secretStore, tokenStore)

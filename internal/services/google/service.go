@@ -33,6 +33,19 @@ func (s *Service) Type() calendar.ServiceType {
 	return calendar.ServiceTypeGoogle
 }
 
+func (s *Service) DisplayName() string {
+	return "Google"
+}
+
+func (s *Service) AuthProvider(account calendar.Account) (calendar.AuthProvider, error) {
+	return providers.NewGoogle(
+		account.ID,
+		account.Setting(clientIDKey),
+		account.Setting(clientSecretKey),
+		[]string{googlecalendar.CalendarReadonlyScope},
+	), nil
+}
+
 func (s *Service) AccountFields() []calendar.AccountField {
 	return []calendar.AccountField{
 		{Key: clientIDKey, Label: "OAuth Client ID", Required: true},

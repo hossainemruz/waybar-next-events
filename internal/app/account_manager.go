@@ -5,14 +5,44 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"strings"
 
 	"github.com/hossainemruz/waybar-next-events/internal/auth"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
+	"golang.org/x/oauth2"
 )
+
+// ConfigLoader defines the config operations app workflows require.
+type ConfigLoader interface {
+	Load() (*config.Config, error)
+	LoadOrEmpty() (*config.Config, error)
+	Save(cfg *config.Config) error
+	Snapshot() (config.Snapshot, error)
+	RestoreSnapshot(snapshot config.Snapshot) error
+}
+
+// Authenticator defines the auth operations app workflows require.
+type Authenticator interface {
+	Authenticate(ctx context.Context, provider providers.Provider) (*oauth2.Token, error)
+	ForceAuthenticate(ctx context.Context, provider providers.Provider) (*oauth2.Token, error)
+	HTTPClient(ctx context.Context, provider providers.Provider) (*http.Client, error)
+}
+
+// Service extends the generic calendar service with secret-aware provider wiring.
+type Service interface {
+	calendar.Service
+	Provider(ctx context.Context, account calendar.Account, secretStore secrets.Store) (providers.Provider, error)
+}
+
+// ServiceResolver resolves services by stable type.
+type ServiceResolver interface {
+	Service(serviceType calendar.ServiceType) (calendar.Service, error)
+}
 
 // CalendarSelector handles interactive calendar-selection decisions.
 type CalendarSelector interface {
@@ -74,7 +104,7 @@ func NewAccountManager(loader ConfigLoader, services ServiceResolver, secretStor
 
 // AddAccount creates, authenticates, and persists a new account.
 func (m *AccountManager) AddAccount(ctx context.Context, input AddAccountInput) (calendar.Account, error) {
-	service, err := m.services.Service(input.Service)
+	service, err := m.resolveService(input.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -140,7 +170,7 @@ func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountI
 		return calendar.Account{}, err
 	}
 
-	service, err := m.services.Service(original.Service)
+	service, err := m.resolveService(original.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -213,7 +243,7 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, input DeleteAccountI
 		return calendar.Account{}, err
 	}
 
-	service, err := m.services.Service(account.Service)
+	service, err := m.resolveService(account.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -272,7 +302,7 @@ func (m *AccountManager) LoginAccount(ctx context.Context, input LoginAccountInp
 		return calendar.Account{}, err
 	}
 
-	service, err := m.services.Service(account.Service)
+	service, err := m.resolveService(account.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -356,6 +386,24 @@ func (m *AccountManager) commitAccountState(ctx context.Context, configSnapshot 
 	}
 
 	return nil
+}
+
+func (m *AccountManager) resolveService(serviceType calendar.ServiceType) (Service, error) {
+	service, err := m.services.Service(serviceType)
+	if err != nil {
+		return nil, err
+	}
+
+	appService, ok := service.(Service)
+	if !ok {
+		return nil, fmt.Errorf("service %q does not implement app service interface", serviceType)
+	}
+
+	return appService, nil
+}
+
+func tokenKey(account calendar.Account) string {
+	return tokenstore.TokenKey(string(account.Service), account.ID)
 }
 
 func findAccount(cfg *config.Config, accountID string) (*calendar.Account, error) {
