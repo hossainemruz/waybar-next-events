@@ -1,2 +1,2 @@
-// Package calendar is the planned home for provider-agnostic calendar types.
+// Package calendar contains provider-agnostic calendar domain types and service abstractions.
 package calendar
