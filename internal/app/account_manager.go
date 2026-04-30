@@ -145,14 +145,15 @@ func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountI
 		Settings:  cloneStringMap(input.Settings),
 		Calendars: cloneCalendarRefs(original.Calendars),
 	}
+	mergedSecrets := mergeSecrets(originalSecrets, input.Secrets, secretKeys)
 
 	stagedSecrets := secrets.NewStagedStore()
-	if err := stageSecrets(ctx, stagedSecrets, updated.ID, service.AccountFields(), input.Secrets); err != nil {
+	if err := stageSecrets(ctx, stagedSecrets, updated.ID, service.AccountFields(), mergedSecrets); err != nil {
 		return calendar.Account{}, err
 	}
 
 	stagedTokens := tokenstore.NewStagedTokenStore()
-	if !credentialsChanged(original, originalSecrets, updated, input.Secrets, secretKeys) {
+	if !credentialsChanged(original, originalSecrets, updated, mergedSecrets, secretKeys) {
 		if err := seedStagedTokenStore(ctx, stagedTokens, m.tokenStore, original); err != nil {
 			return calendar.Account{}, err
 		}
@@ -311,7 +312,7 @@ func (m *AccountManager) discoverAndSelectCalendars(ctx context.Context, service
 	}
 
 	if selector == nil {
-		return nil, ErrAccountSelectionRequired
+		return nil, ErrCalendarSelectionRequired
 	}
 
 	selected, err := selector.SelectCalendars(ctx, account, discovered)
@@ -482,6 +483,22 @@ func credentialsChanged(original *calendar.Account, originalSecrets map[string]s
 	}
 
 	return false
+}
+
+func mergeSecrets(existing map[string]secretSnapshot, updated map[string]string, keys []string) map[string]string {
+	merged := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := updated[key]; ok {
+			merged[key] = strings.TrimSpace(value)
+			continue
+		}
+
+		if stored, ok := existing[key]; ok && stored.found {
+			merged[key] = stored.value
+		}
+	}
+
+	return merged
 }
 
 func secretFieldKeys(fields []calendar.AccountField) []string {

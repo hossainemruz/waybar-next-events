@@ -3,6 +3,6 @@ package app
 import "errors"
 
 var (
-	// ErrAccountSelectionRequired indicates a workflow expected a calendar selector.
-	ErrAccountSelectionRequired = errors.New("calendar selection is required")
+	// ErrCalendarSelectionRequired indicates a workflow expected a calendar selector.
+	ErrCalendarSelectionRequired = errors.New("calendar selection is required")
 )
