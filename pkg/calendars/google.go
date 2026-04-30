@@ -2,12 +2,14 @@ package calendars
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
 	appcalendar "github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/pkg/types"
@@ -20,6 +22,9 @@ import (
 // future in-memory token cache optimizations.
 var defaultAuthenticator = auth.NewAuthenticator(nil)
 
+// defaultSecretStore is the shared secrets store used by calendar operations.
+var defaultSecretStore = secrets.NewKeyringStore()
+
 // DiscoverCalendarsWithAuthenticator authenticates with the given Google
 // account using the provided authenticator and fetches the list of available
 // calendars. It returns a slice of DiscoveredCalendar values containing both
@@ -28,12 +33,11 @@ var defaultAuthenticator = auth.NewAuthenticator(nil)
 // until the full flow succeeds while still reusing the shared discovery path.
 //
 // If the account has no calendars, an empty slice is returned.
-func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.Account, authenticator *auth.Authenticator) ([]DiscoveredCalendar, error) {
-	googleProvider := providers.NewGoogle(
-		account.Setting("client_id"),
-		account.Setting("client_secret"),
-		[]string{calendar.CalendarReadonlyScope},
-	)
+func DiscoverCalendarsWithAuthenticator(ctx context.Context, account *config.Account, secretStore secrets.Store, authenticator *auth.Authenticator) ([]DiscoveredCalendar, error) {
+	googleProvider, err := GoogleProviderForAccount(ctx, account, secretStore)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Google provider for account %q: %w", account.Name, err)
+	}
 
 	client, err := authenticator.HTTPClient(ctx, googleProvider)
 	if err != nil {
@@ -71,17 +75,33 @@ type DiscoveredCalendar struct {
 	Primary  bool
 }
 
+// GoogleProviderForAccount builds a Google auth provider using non-secret
+// account settings plus secrets loaded from the configured secret store.
+func GoogleProviderForAccount(ctx context.Context, account *config.Account, secretStore secrets.Store) (*providers.Google, error) {
+	clientSecret, err := secretStore.Get(ctx, account.ID, "client_secret")
+	if err != nil {
+		if errors.Is(err, secrets.ErrSecretNotFound) {
+			return nil, fmt.Errorf("missing stored secret %q", "client_secret")
+		}
+		return nil, fmt.Errorf("failed to load stored secret %q: %w", "client_secret", err)
+	}
+
+	return providers.NewGoogle(
+		account.Setting("client_id"),
+		clientSecret,
+		[]string{calendar.CalendarReadonlyScope},
+	), nil
+}
+
 // getCalendarServiceForAccount returns a Google Calendar service client with
 // automatic authentication and token refresh for the given account.
-func getCalendarServiceForAccount(account *config.Account) (*calendar.Service, error) {
+func getCalendarServiceForAccount(account *config.Account, secretStore secrets.Store) (*calendar.Service, error) {
 	ctx := context.Background()
 
-	// Create Google OAuth provider for this account
-	googleProvider := providers.NewGoogle(
-		account.Setting("client_id"),
-		account.Setting("client_secret"),
-		[]string{calendar.CalendarReadonlyScope},
-	)
+	googleProvider, err := GoogleProviderForAccount(ctx, account, secretStore)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Google provider for account %q: %w", account.Name, err)
+	}
 
 	// Get HTTP client with automatic token refresh
 	client, err := defaultAuthenticator.HTTPClient(ctx, googleProvider)
@@ -122,7 +142,7 @@ func GoogleEvents() ([]types.Event, error) {
 	for i := range googleCfg {
 		account := &googleCfg[i]
 
-		srv, err := getCalendarServiceForAccount(account)
+		srv, err := getCalendarServiceForAccount(account, defaultSecretStore)
 		if err != nil {
 			return nil, err
 		}

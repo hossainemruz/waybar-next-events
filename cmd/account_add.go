@@ -10,6 +10,7 @@ import (
 	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
@@ -38,8 +39,9 @@ type accountAddPrompter interface {
 type accountAddDependencies struct {
 	newLoader         func() *appconfig.Loader
 	newPrompter       func(cmd *cobra.Command) accountAddPrompter
+	newSecretStore    func() secrets.Store
 	newTokenStore     func() tokenstore.TokenStore
-	discoverCalendars func(ctx context.Context, account *appconfig.Account, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
+	discoverCalendars func(ctx context.Context, account *appconfig.Account, secretStore secrets.Store, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
 }
 
 var defaultAccountAddDependencies = accountAddDependencies{
@@ -51,6 +53,9 @@ var defaultAccountAddDependencies = accountAddDependencies{
 			input:  cmd.InOrStdin(),
 			output: cmd.ErrOrStderr(),
 		}
+	},
+	newSecretStore: func() secrets.Store {
+		return secrets.NewKeyringStore()
 	},
 	newTokenStore: func() tokenstore.TokenStore {
 		return tokenstore.NewKeyringTokenStore()
@@ -83,6 +88,7 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 	if err != nil {
 		return fmt.Errorf("failed to snapshot config before save: %w", err)
 	}
+	secretStore := deps.newSecretStore()
 
 	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
@@ -98,17 +104,33 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return err
 	}
 
+	accountID, err := appconfig.NewAccountID()
+	if err != nil {
+		return fmt.Errorf("failed to generate account ID: %w", err)
+	}
+
+	collected := collectedAccountInput{
+		Name: strings.TrimSpace(input.Name),
+		Settings: map[string]string{
+			"client_id": strings.TrimSpace(input.ClientID),
+		},
+		Secrets: map[string]string{
+			googleClientSecretKey: strings.TrimSpace(input.ClientSecret),
+		},
+	}
+
+	stagedSecretStore := secrets.NewStagedStore()
+	if err := stageGoogleAccountSecrets(ctx, stagedSecretStore, accountID, collected); err != nil {
+		return err
+	}
+
 	stagingStore := tokenstore.NewStagedTokenStore()
 	authenticator := auth.NewAuthenticator(stagingStore)
-	newAccount := &appconfig.Account{
-		Service: calendar.ServiceTypeGoogle,
-		Name:    strings.TrimSpace(input.Name),
-	}
-	newAccount.SetSetting("client_id", strings.TrimSpace(input.ClientID))
-	// TODO(subtask-4): move secret fields like client_secret out of persisted config settings.
-	newAccount.SetSetting("client_secret", strings.TrimSpace(input.ClientSecret))
+	newAccount := buildGoogleAccount(collected, nil)
+	newAccount.ID = accountID
+	newAccount.Service = calendar.ServiceTypeGoogle
 
-	discovered, err := deps.discoverCalendars(ctx, newAccount, authenticator)
+	discovered, err := deps.discoverCalendars(ctx, newAccount, stagedSecretStore, authenticator)
 	if err != nil {
 		return err
 	}
@@ -138,10 +160,34 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	if err := stagingStore.Commit(ctx, deps.newTokenStore()); err != nil {
+	secretSnapshot, err := snapshotAccountSecrets(ctx, secretStore, newAccount.ID, []string{googleClientSecretKey})
+	if err != nil {
 		rollbackErr := loader.RestoreSnapshot(configSnapshot)
 		if rollbackErr != nil {
-			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), fmt.Errorf("failed to restore config after token persistence error: %w", rollbackErr))
+			return errors.Join(fmt.Errorf("failed to snapshot account secrets: %w", err), fmt.Errorf("failed to restore config after secret snapshot error: %w", rollbackErr))
+		}
+		return fmt.Errorf("failed to snapshot account secrets: %w", err)
+	}
+
+	if err := stagedSecretStore.Commit(ctx, secretStore); err != nil {
+		rollbackErr := loader.RestoreSnapshot(configSnapshot)
+		if rollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist account secrets: %w", err), fmt.Errorf("failed to restore config after secret persistence error: %w", rollbackErr))
+		}
+		return fmt.Errorf("failed to persist account secrets: %w", err)
+	}
+
+	if err := stagingStore.Commit(ctx, deps.newTokenStore()); err != nil {
+		secretRollbackErr := restoreAccountSecrets(context.Background(), secretStore, newAccount.ID, secretSnapshot)
+		configRollbackErr := loader.RestoreSnapshot(configSnapshot)
+		if secretRollbackErr != nil && configRollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), secretRollbackErr, fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
+		}
+		if secretRollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), secretRollbackErr)
+		}
+		if configRollbackErr != nil {
+			return errors.Join(fmt.Errorf("failed to persist OAuth token: %w", err), fmt.Errorf("failed to restore config after token persistence error: %w", configRollbackErr))
 		}
 		return fmt.Errorf("failed to persist OAuth token: %w", err)
 	}

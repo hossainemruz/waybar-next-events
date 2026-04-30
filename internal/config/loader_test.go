@@ -20,8 +20,7 @@ func TestLoaderLoadAndSaveRoundTrip(t *testing.T) {
 				Service: calendar.ServiceTypeGoogle,
 				Name:    "Personal",
 				Settings: map[string]string{
-					"client_id":     "personal-client",
-					"client_secret": "personal-secret",
+					"client_id": "personal-client",
 				},
 				Calendars: []CalendarRef{{ID: "home", Name: "Home"}},
 			},
@@ -30,8 +29,7 @@ func TestLoaderLoadAndSaveRoundTrip(t *testing.T) {
 				Service: calendar.ServiceTypeGoogle,
 				Name:    "Work",
 				Settings: map[string]string{
-					"client_id":     "work-client",
-					"client_secret": "work-secret",
+					"client_id": "work-client",
 				},
 				Calendars: []CalendarRef{{ID: "team", Name: "Team"}, {ID: "primary", Name: "Primary"}},
 			},
@@ -134,8 +132,7 @@ func TestLoaderSaveIsDeterministic(t *testing.T) {
 		Service: calendar.ServiceTypeGoogle,
 		Name:    "Work",
 		Settings: map[string]string{
-			"client_secret": "secret",
-			"client_id":     "client",
+			"client_id": "client",
 		},
 		Calendars: []CalendarRef{{ID: "b", Name: "B"}, {ID: "a", Name: "A"}},
 	}, {
@@ -165,6 +162,9 @@ func TestLoaderSaveIsDeterministic(t *testing.T) {
 	}
 	if !strings.Contains(string(first), `"accounts"`) || strings.Contains(string(first), `"google":`) {
 		t.Fatalf("saved JSON = %s, want generic accounts shape only", first)
+	}
+	if strings.Contains(string(first), `"client_secret"`) {
+		t.Fatalf("saved JSON unexpectedly contained client_secret: %s", first)
 	}
 }
 
@@ -211,5 +211,58 @@ func TestLoaderSnapshotAndRestore(t *testing.T) {
 	}
 	if string(data) != `{"accounts":[]}` {
 		t.Fatalf("restored config = %s, want empty accounts config", data)
+	}
+}
+
+func TestLoaderSaveUsesRestrictedPermissions(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "config.json")
+	loader := NewLoaderWithPath(path)
+
+	if err := loader.Save(&Config{Accounts: []Account{}}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("Stat(dir) error = %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != configDirPermission {
+		t.Fatalf("dir mode = %o, want %o", got, configDirPermission)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(file) error = %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != ConfigFilePermission {
+		t.Fatalf("file mode = %o, want %o", got, ConfigFilePermission)
+	}
+}
+
+func TestLoaderRestoreSnapshotUsesRestrictedPermissions(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "config.json")
+	loader := NewLoaderWithPath(path)
+
+	snapshot := Snapshot{exists: true, data: []byte(`{"accounts":[]}`)}
+	if err := loader.RestoreSnapshot(snapshot); err != nil {
+		t.Fatalf("RestoreSnapshot() error = %v", err)
+	}
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("Stat(dir) error = %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != configDirPermission {
+		t.Fatalf("dir mode = %o, want %o", got, configDirPermission)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(file) error = %v", err)
+	}
+	if got := fileInfo.Mode().Perm(); got != ConfigFilePermission {
+		t.Fatalf("file mode = %o, want %o", got, ConfigFilePermission)
 	}
 }

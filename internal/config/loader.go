@@ -15,9 +15,9 @@ const (
 	// ConfigFileName is the name of the configuration file.
 	ConfigFileName = "config.json"
 	// configDirPermission is the permission used for config directories.
-	configDirPermission = 0o755
+	configDirPermission = 0o700
 	// ConfigFilePermission is the permission used for config files.
-	ConfigFilePermission = 0o644
+	ConfigFilePermission = 0o600
 )
 
 // Loader handles loading configuration from files.
