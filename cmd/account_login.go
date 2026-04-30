@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hossainemruz/waybar-next-events/internal/auth"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
