@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/providers"
@@ -22,9 +23,9 @@ type accountUpdateInput struct {
 }
 
 type accountUpdatePrompter interface {
-	PromptAccountSelection(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (string, error)
-	PromptAccountDetails(ctx context.Context, googleCfg *appconfig.GoogleCalendar, input accountUpdateInput) (accountUpdateInput, error)
-	PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.Calendar, error)
+	PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error)
+	PromptAccountDetails(ctx context.Context, cfg *appconfig.Config, input accountUpdateInput) (accountUpdateInput, error)
+	PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.CalendarRef, error)
 	ShowNoCalendarsFound(ctx context.Context, accountName string) error
 }
 
@@ -32,8 +33,8 @@ type accountUpdateDependencies struct {
 	newLoader         func() *appconfig.Loader
 	newPrompter       func(cmd *cobra.Command) accountUpdatePrompter
 	newTokenStore     func() tokenstore.TokenStore
-	clearToken        func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.GoogleAccount) error
-	discoverCalendars func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
+	clearToken        func(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error
+	discoverCalendars func(ctx context.Context, account *appconfig.Account, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
 }
 
 var defaultAccountUpdateDependencies = accountUpdateDependencies{
@@ -51,7 +52,7 @@ var defaultAccountUpdateDependencies = accountUpdateDependencies{
 	newTokenStore: func() tokenstore.TokenStore {
 		return tokenstore.NewKeyringTokenStore()
 	},
-	clearToken:        clearGoogleAccountToken,
+	clearToken:        clearAccountToken,
 	discoverCalendars: calendars.DiscoverCalendarsWithAuthenticator,
 }
 
@@ -81,17 +82,17 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return fmt.Errorf("failed to snapshot config before save: %w", err)
 	}
 
-	cfg, googleCfg, err := loadGoogleConfigOrEmpty(loader)
+	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
 		return err
 	}
 
-	if err := ensureHasAccounts(googleCfg); err != nil {
+	if err := ensureHasAccounts(cfg); err != nil {
 		return err
 	}
 
 	prompter := deps.newPrompter(cmd)
-	selectedAccountName, err := prompter.PromptAccountSelection(ctx, googleCfg)
+	selectedAccountID, err := prompter.PromptAccountSelection(ctx, cfg)
 	if err != nil {
 		if isUserAbort(err) {
 			return nil
@@ -99,22 +100,14 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return err
 	}
 
-	originalIndex := -1
-	for i := range googleCfg.Accounts {
-		if googleCfg.Accounts[i].Name == selectedAccountName {
-			originalIndex = i
-			break
-		}
+	originalAccount, err := findAccountByID(cfg, selectedAccountID)
+	if err != nil {
+		return err
 	}
-	if originalIndex == -1 {
-		return fmt.Errorf("%w: %q", appconfig.ErrAccountNotFound, selectedAccountName)
-	}
-
-	originalAccount := googleCfg.Accounts[originalIndex]
-	input, err := prompter.PromptAccountDetails(ctx, googleCfg, accountUpdateInput{
+	input, err := prompter.PromptAccountDetails(ctx, cfg, accountUpdateInput{
 		Name:         originalAccount.Name,
-		ClientID:     originalAccount.ClientID,
-		ClientSecret: originalAccount.ClientSecret,
+		ClientID:     originalAccount.Setting("client_id"),
+		ClientSecret: originalAccount.Setting("client_secret"),
 	})
 	if err != nil {
 		if isUserAbort(err) {
@@ -123,18 +116,22 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return err
 	}
 
-	updatedAccount := &appconfig.GoogleAccount{
-		Name:         strings.TrimSpace(input.Name),
-		ClientID:     strings.TrimSpace(input.ClientID),
-		ClientSecret: strings.TrimSpace(input.ClientSecret),
-		Calendars:    cloneCalendars(originalAccount.Calendars),
+	updatedAccount := &appconfig.Account{
+		ID:        originalAccount.ID,
+		Service:   calendar.ServiceTypeGoogle,
+		Name:      strings.TrimSpace(input.Name),
+		Settings:  cloneSettings(originalAccount.Settings),
+		Calendars: cloneCalendars(originalAccount.Calendars),
 	}
+	updatedAccount.SetSetting("client_id", strings.TrimSpace(input.ClientID))
+	// TODO(subtask-4): move secret fields like client_secret out of persisted config settings.
+	updatedAccount.SetSetting("client_secret", strings.TrimSpace(input.ClientSecret))
 
 	stagingStore := tokenstore.NewStagedTokenStore()
 	authenticator := auth.NewAuthenticator(stagingStore)
 
-	if accountCredentialsChanged(originalAccount, *updatedAccount) {
-		if err := deps.clearToken(ctx, authenticator, &originalAccount); err != nil {
+	if accountCredentialsChanged(*originalAccount, *updatedAccount) {
+		if err := deps.clearToken(ctx, authenticator, originalAccount); err != nil {
 			return err
 		}
 	}
@@ -151,9 +148,9 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 			}
 			return err
 		}
-		updatedAccount.Calendars = []appconfig.Calendar{}
+		updatedAccount.Calendars = []appconfig.CalendarRef{}
 	} else {
-		selectedCalendars, err := prompter.PromptCalendarSelection(ctx, updatedAccount.Name, discovered, currentCalendarIDs(originalAccount))
+		selectedCalendars, err := prompter.PromptCalendarSelection(ctx, updatedAccount.Name, discovered, currentCalendarIDs(*originalAccount))
 		if err != nil {
 			if isUserAbort(err) {
 				return nil
@@ -163,7 +160,12 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		updatedAccount.Calendars = selectedCalendars
 	}
 
-	googleCfg.Accounts[originalIndex] = *updatedAccount
+	for i := range cfg.Accounts {
+		if cfg.Accounts[i].ID == updatedAccount.ID {
+			cfg.Accounts[i] = *updatedAccount
+			break
+		}
+	}
 
 	if err := loader.Save(cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
@@ -185,29 +187,12 @@ type huhAccountUpdatePrompter struct {
 	*huhAccountAddPrompter
 }
 
-func (p *huhAccountUpdatePrompter) PromptAccountSelection(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (string, error) {
-	selectedAccountName := googleCfg.Accounts[0].Name
-
-	form := p.configureForm(
-		huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Select an account to update").
-					Options(accountSelectionOptions(googleCfg)...).
-					Value(&selectedAccountName),
-			),
-		),
-	)
-
-	if err := form.RunWithContext(ctx); err != nil {
-		return "", err
-	}
-
-	return selectedAccountName, nil
+func (p *huhAccountUpdatePrompter) PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error) {
+	return promptAccountSelection(ctx, p.huhAccountAddPrompter, cfg, "Select an account to update")
 }
 
-func (p *huhAccountUpdatePrompter) PromptAccountDetails(ctx context.Context, googleCfg *appconfig.GoogleCalendar, input accountUpdateInput) (accountUpdateInput, error) {
-	form := p.configureForm(newUpdateAccountDetailsForm(&input, googleCfg))
+func (p *huhAccountUpdatePrompter) PromptAccountDetails(ctx context.Context, cfg *appconfig.Config, input accountUpdateInput) (accountUpdateInput, error) {
+	form := p.configureForm(newUpdateAccountDetailsForm(&input, cfg))
 	if err := form.RunWithContext(ctx); err != nil {
 		return accountUpdateInput{}, err
 	}
@@ -219,7 +204,7 @@ func (p *huhAccountUpdatePrompter) PromptAccountDetails(ctx context.Context, goo
 	return input, nil
 }
 
-func (p *huhAccountUpdatePrompter) PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.Calendar, error) {
+func (p *huhAccountUpdatePrompter) PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.CalendarRef, error) {
 	options := calendarSelectionOptions(discovered)
 
 	form := p.configureForm(
@@ -241,7 +226,7 @@ func (p *huhAccountUpdatePrompter) PromptCalendarSelection(ctx context.Context, 
 	return selectedCalendars(discovered, selectedCalendarIDs), nil
 }
 
-func newUpdateAccountDetailsForm(input *accountUpdateInput, googleCfg *appconfig.GoogleCalendar) *huh.Form {
+func newUpdateAccountDetailsForm(input *accountUpdateInput, cfg *appconfig.Config) *huh.Form {
 	currentAccountName := input.Name
 
 	return huh.NewForm(
@@ -251,7 +236,7 @@ func newUpdateAccountDetailsForm(input *accountUpdateInput, googleCfg *appconfig
 				Placeholder("Work").
 				Value(&input.Name).
 				Validate(func(value string) error {
-					return validateUpdatedAccountName(googleCfg, currentAccountName, value)
+					return validateUpdatedAccountName(cfg, currentAccountName, value)
 				}),
 			huh.NewInput().
 				Title(titleClientID).
@@ -265,7 +250,7 @@ func newUpdateAccountDetailsForm(input *accountUpdateInput, googleCfg *appconfig
 	)
 }
 
-func validateUpdatedAccountName(googleCfg *appconfig.GoogleCalendar, currentAccountName string, value string) error {
+func validateUpdatedAccountName(cfg *appconfig.Config, currentAccountName string, value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return fmt.Errorf("account name is required")
@@ -275,10 +260,10 @@ func validateUpdatedAccountName(googleCfg *appconfig.GoogleCalendar, currentAcco
 		return nil
 	}
 
-	return ensureAccountNameAvailable(googleCfg, trimmed)
+	return ensureAccountNameAvailable(cfg, trimmed)
 }
 
-func currentCalendarIDs(account appconfig.GoogleAccount) []string {
+func currentCalendarIDs(account appconfig.Account) []string {
 	if len(account.Calendars) == 0 {
 		return []string{}
 	}
@@ -291,22 +276,35 @@ func currentCalendarIDs(account appconfig.GoogleAccount) []string {
 	return calendarIDs
 }
 
-func cloneCalendars(calendars []appconfig.Calendar) []appconfig.Calendar {
+func cloneCalendars(calendars []appconfig.CalendarRef) []appconfig.CalendarRef {
 	if len(calendars) == 0 {
-		return []appconfig.Calendar{}
+		return []appconfig.CalendarRef{}
 	}
 
-	cloned := make([]appconfig.Calendar, len(calendars))
+	cloned := make([]appconfig.CalendarRef, len(calendars))
 	copy(cloned, calendars)
 	return cloned
 }
 
-func accountCredentialsChanged(original appconfig.GoogleAccount, updated appconfig.GoogleAccount) bool {
-	return original.ClientID != updated.ClientID || original.ClientSecret != updated.ClientSecret
+func cloneSettings(settings map[string]string) map[string]string {
+	if len(settings) == 0 {
+		return map[string]string{}
+	}
+
+	cloned := make(map[string]string, len(settings))
+	for key, value := range settings {
+		cloned[key] = value
+	}
+
+	return cloned
 }
 
-func clearGoogleAccountToken(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.GoogleAccount) error {
-	provider := providers.NewGoogle(account.ClientID, account.ClientSecret, nil)
+func accountCredentialsChanged(original appconfig.Account, updated appconfig.Account) bool {
+	return original.Setting("client_id") != updated.Setting("client_id") || original.Setting("client_secret") != updated.Setting("client_secret")
+}
+
+func clearAccountToken(ctx context.Context, authenticator *auth.Authenticator, account *appconfig.Account) error {
+	provider := providers.NewGoogle(account.Setting("client_id"), account.Setting("client_secret"), nil)
 	if err := authenticator.ClearToken(ctx, provider); err != nil {
 		return fmt.Errorf("failed to clear old OAuth token for account %q: %w", account.Name, err)
 	}

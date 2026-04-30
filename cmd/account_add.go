@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth"
 	"github.com/hossainemruz/waybar-next-events/pkg/auth/tokenstore"
@@ -29,8 +30,8 @@ type accountAddInput struct {
 }
 
 type accountAddPrompter interface {
-	PromptAccountDetails(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (accountAddInput, error)
-	PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar) ([]appconfig.Calendar, error)
+	PromptAccountDetails(ctx context.Context, cfg *appconfig.Config) (accountAddInput, error)
+	PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar) ([]appconfig.CalendarRef, error)
 	ShowNoCalendarsFound(ctx context.Context, accountName string) error
 }
 
@@ -38,7 +39,7 @@ type accountAddDependencies struct {
 	newLoader         func() *appconfig.Loader
 	newPrompter       func(cmd *cobra.Command) accountAddPrompter
 	newTokenStore     func() tokenstore.TokenStore
-	discoverCalendars func(ctx context.Context, account *appconfig.GoogleAccount, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
+	discoverCalendars func(ctx context.Context, account *appconfig.Account, authenticator *auth.Authenticator) ([]calendars.DiscoveredCalendar, error)
 }
 
 var defaultAccountAddDependencies = accountAddDependencies{
@@ -83,13 +84,13 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return fmt.Errorf("failed to snapshot config before save: %w", err)
 	}
 
-	cfg, googleCfg, err := loadGoogleConfigOrEmpty(loader)
+	cfg, err := loadConfigOrEmpty(loader)
 	if err != nil {
 		return err
 	}
 
 	prompter := deps.newPrompter(cmd)
-	input, err := prompter.PromptAccountDetails(ctx, googleCfg)
+	input, err := prompter.PromptAccountDetails(ctx, cfg)
 	if err != nil {
 		if isUserAbort(err) {
 			return nil
@@ -99,11 +100,13 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 
 	stagingStore := tokenstore.NewStagedTokenStore()
 	authenticator := auth.NewAuthenticator(stagingStore)
-	newAccount := &appconfig.GoogleAccount{
-		Name:         strings.TrimSpace(input.Name),
-		ClientID:     strings.TrimSpace(input.ClientID),
-		ClientSecret: strings.TrimSpace(input.ClientSecret),
+	newAccount := &appconfig.Account{
+		Service: calendar.ServiceTypeGoogle,
+		Name:    strings.TrimSpace(input.Name),
 	}
+	newAccount.SetSetting("client_id", strings.TrimSpace(input.ClientID))
+	// TODO(subtask-4): move secret fields like client_secret out of persisted config settings.
+	newAccount.SetSetting("client_secret", strings.TrimSpace(input.ClientSecret))
 
 	discovered, err := deps.discoverCalendars(ctx, newAccount, authenticator)
 	if err != nil {
@@ -117,7 +120,7 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 			}
 			return err
 		}
-		newAccount.Calendars = []appconfig.Calendar{}
+		newAccount.Calendars = []appconfig.CalendarRef{}
 	} else {
 		selectedCalendars, err := prompter.PromptCalendarSelection(ctx, newAccount.Name, discovered)
 		if err != nil {
@@ -129,7 +132,7 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		newAccount.Calendars = selectedCalendars
 	}
 
-	googleCfg.Accounts = append(googleCfg.Accounts, *newAccount)
+	cfg.Accounts = append(cfg.Accounts, *newAccount)
 
 	if err := loader.Save(cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
@@ -153,10 +156,10 @@ type huhAccountAddPrompter struct {
 	accessible bool
 }
 
-func (p *huhAccountAddPrompter) PromptAccountDetails(ctx context.Context, googleCfg *appconfig.GoogleCalendar) (accountAddInput, error) {
+func (p *huhAccountAddPrompter) PromptAccountDetails(ctx context.Context, cfg *appconfig.Config) (accountAddInput, error) {
 	var input accountAddInput
 
-	form := p.configureForm(newAccountDetailsForm(&input, googleCfg))
+	form := p.configureForm(newAccountDetailsForm(&input, cfg))
 	if err := form.RunWithContext(ctx); err != nil {
 		return accountAddInput{}, err
 	}
@@ -168,7 +171,7 @@ func (p *huhAccountAddPrompter) PromptAccountDetails(ctx context.Context, google
 	return input, nil
 }
 
-func (p *huhAccountAddPrompter) PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar) ([]appconfig.Calendar, error) {
+func (p *huhAccountAddPrompter) PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar) ([]appconfig.CalendarRef, error) {
 	options := calendarSelectionOptions(discovered)
 	selectedCalendarIDs := make([]string, 0)
 
@@ -220,7 +223,7 @@ func (p *huhAccountAddPrompter) configureForm(form *huh.Form) *huh.Form {
 	return form
 }
 
-func newAccountDetailsForm(input *accountAddInput, googleCfg *appconfig.GoogleCalendar) *huh.Form {
+func newAccountDetailsForm(input *accountAddInput, cfg *appconfig.Config) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
@@ -228,7 +231,7 @@ func newAccountDetailsForm(input *accountAddInput, googleCfg *appconfig.GoogleCa
 				Placeholder("Work").
 				Value(&input.Name).
 				Validate(func(value string) error {
-					return validateNewAccountName(googleCfg, value)
+					return validateNewAccountName(cfg, value)
 				}),
 			huh.NewInput().
 				Title(titleClientID).
@@ -242,13 +245,13 @@ func newAccountDetailsForm(input *accountAddInput, googleCfg *appconfig.GoogleCa
 	)
 }
 
-func validateNewAccountName(googleCfg *appconfig.GoogleCalendar, value string) error {
+func validateNewAccountName(cfg *appconfig.Config, value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return fmt.Errorf("account name is required")
 	}
 
-	if err := ensureAccountNameAvailable(googleCfg, trimmed); err != nil {
+	if err := ensureAccountNameAvailable(cfg, trimmed); err != nil {
 		return err
 	}
 
