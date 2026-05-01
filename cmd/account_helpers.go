@@ -7,8 +7,6 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
-	"github.com/hossainemruz/waybar-next-events/internal/auth"
-	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
@@ -18,17 +16,6 @@ const (
 	noAccountsConfiguredHint = "add an account first"
 	googleClientSecretKey    = "client_secret"
 )
-
-type collectedAccountInput struct {
-	Name     string
-	Settings map[string]string
-	Secrets  map[string]string
-}
-
-type secretSnapshot struct {
-	value string
-	found bool
-}
 
 func loadConfigOrEmpty(loader *appconfig.Loader) (*appconfig.Config, error) {
 	cfg, err := loader.LoadOrEmpty()
@@ -40,7 +27,7 @@ func loadConfigOrEmpty(loader *appconfig.Loader) (*appconfig.Config, error) {
 }
 
 func hasNoAccounts(cfg *appconfig.Config) bool {
-	return cfg == nil || len(cfg.AccountsByService(calendar.ServiceTypeGoogle)) == 0
+	return cfg == nil || len(cfg.Accounts) == 0
 }
 
 func ensureHasAccounts(cfg *appconfig.Config) error {
@@ -73,7 +60,7 @@ func findAccountByID(cfg *appconfig.Config, id string) (*appconfig.Account, erro
 	}
 
 	account := cfg.FindAccountByID(id)
-	if account == nil || account.Service != calendar.ServiceTypeGoogle {
+	if account == nil {
 		return nil, fmt.Errorf("%w: %q", appconfig.ErrAccountNotFound, id)
 	}
 
@@ -85,7 +72,7 @@ func accountSelectionOptions(cfg *appconfig.Config) []huh.Option[string] {
 		return nil
 	}
 
-	accounts := cfg.AccountsByService(calendar.ServiceTypeGoogle)
+	accounts := cfg.Accounts
 	options := make([]huh.Option[string], 0, len(accounts))
 	for i, account := range accounts {
 		options = append(options, huh.NewOption(accountSelectionLabel(account, i), account.ID))
@@ -95,7 +82,7 @@ func accountSelectionOptions(cfg *appconfig.Config) []huh.Option[string] {
 }
 
 func promptAccountSelection(ctx context.Context, prompter *huhAccountAddPrompter, cfg *appconfig.Config, title string) (string, error) {
-	accounts := cfg.AccountsByService(calendar.ServiceTypeGoogle)
+	accounts := cfg.Accounts
 	selectedAccountID := accounts[0].ID
 
 	form := prompter.configureForm(
@@ -154,38 +141,6 @@ func selectedCalendars(discovered []calendars.DiscoveredCalendar, selectedCalend
 	return selectedCalendars
 }
 
-func buildGoogleAccount(input collectedAccountInput, existing *appconfig.Account) *appconfig.Account {
-	account := &appconfig.Account{
-		Name:      strings.TrimSpace(input.Name),
-		Settings:  cloneSettings(input.Settings),
-		Calendars: []appconfig.CalendarRef{},
-	}
-	if existing != nil {
-		account.ID = existing.ID
-		account.Service = existing.Service
-		account.Calendars = cloneCalendars(existing.Calendars)
-	}
-
-	return account
-}
-
-func stageGoogleAccountSecrets(ctx context.Context, staged *secrets.StagedStore, accountID string, input collectedAccountInput) error {
-	clientSecret := strings.TrimSpace(input.Secrets[googleClientSecretKey])
-	if err := staged.Set(ctx, accountID, googleClientSecretKey, clientSecret); err != nil {
-		return fmt.Errorf("failed to stage account secret %q: %w", googleClientSecretKey, err)
-	}
-
-	return nil
-}
-
-func stageGoogleAccountSecretDeletion(ctx context.Context, staged *secrets.StagedStore, accountID string) error {
-	if err := staged.Delete(ctx, accountID, googleClientSecretKey); err != nil {
-		return fmt.Errorf("failed to stage account secret deletion %q: %w", googleClientSecretKey, err)
-	}
-
-	return nil
-}
-
 func loadGoogleClientSecret(ctx context.Context, store secrets.Store, account *appconfig.Account) (string, error) {
 	if account == nil {
 		return "", fmt.Errorf("account cannot be nil")
@@ -200,52 +155,4 @@ func loadGoogleClientSecret(ctx context.Context, store secrets.Store, account *a
 	}
 
 	return value, nil
-}
-
-func clearAccountToken(ctx context.Context, authenticator *auth.Authenticator, secretStore secrets.Store, account *appconfig.Account) error {
-	provider, err := calendars.GoogleProviderForAccount(ctx, account, secretStore)
-	if err != nil {
-		return err
-	}
-
-	if err := authenticator.ClearToken(ctx, provider); err != nil {
-		return fmt.Errorf("failed to clear old OAuth token for account %q: %w", account.Name, err)
-	}
-
-	return nil
-}
-
-func snapshotAccountSecrets(ctx context.Context, store secrets.Store, accountID string, keys []string) (map[string]secretSnapshot, error) {
-	snapshot := make(map[string]secretSnapshot, len(keys))
-	for _, key := range keys {
-		value, err := store.Get(ctx, accountID, key)
-		if err != nil {
-			if errors.Is(err, secrets.ErrSecretNotFound) {
-				snapshot[key] = secretSnapshot{found: false}
-				continue
-			}
-			return nil, fmt.Errorf("failed to snapshot secret %q: %w", key, err)
-		}
-
-		snapshot[key] = secretSnapshot{value: value, found: true}
-	}
-
-	return snapshot, nil
-}
-
-func restoreAccountSecrets(ctx context.Context, store secrets.Store, accountID string, snapshot map[string]secretSnapshot) error {
-	for key, stored := range snapshot {
-		if stored.found {
-			if err := store.Set(ctx, accountID, key, stored.value); err != nil {
-				return fmt.Errorf("failed to restore secret %q: %w", key, err)
-			}
-			continue
-		}
-
-		if err := store.Delete(ctx, accountID, key); err != nil {
-			return fmt.Errorf("failed to restore secret deletion for %q: %w", key, err)
-		}
-	}
-
-	return nil
 }

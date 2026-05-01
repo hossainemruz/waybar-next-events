@@ -23,10 +23,6 @@ func (s testService) AccountFields() []AccountField {
 	return nil
 }
 
-func (s testService) AuthProvider(Account) (AuthProvider, error) {
-	return nil, nil
-}
-
 func (s testService) DiscoverCalendars(context.Context, Account, *http.Client) ([]Calendar, error) {
 	return nil, nil
 }

@@ -1,2 +1,2 @@
-// Package app is the planned home for application workflows.
+// Package app contains reusable application workflows.
 package app
