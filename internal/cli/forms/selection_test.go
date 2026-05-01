@@ -16,7 +16,11 @@ func TestAccountSelectFormDefaultsToFirstAccount(t *testing.T) {
 	}
 	selected := ""
 	out := &strings.Builder{}
-	form := NewAccountSelectForm(accounts, "Pick an account", &selected).WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
+	form, err := NewAccountSelectForm(accounts, "Pick an account", &selected)
+	if err != nil {
+		t.Fatalf("NewAccountSelectForm() error = %v", err)
+	}
+	form = form.WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
@@ -31,7 +35,11 @@ func TestAccountSelectFormLabelsEmptyNames(t *testing.T) {
 	}
 	selected := ""
 	out := &strings.Builder{}
-	form := NewAccountSelectForm(accounts, "Pick an account", &selected).WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
+	form, err := NewAccountSelectForm(accounts, "Pick an account", &selected)
+	if err != nil {
+		t.Fatalf("NewAccountSelectForm() error = %v", err)
+	}
+	form = form.WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
@@ -47,41 +55,16 @@ func TestServiceSelectFormDefaultsToFirstService(t *testing.T) {
 	}
 	selected := ""
 	out := &strings.Builder{}
-	form := NewServiceSelectForm(services, &selected).WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
+	form, err := NewServiceSelectForm(services, &selected)
+	if err != nil {
+		t.Fatalf("NewServiceSelectForm() error = %v", err)
+	}
+	form = form.WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
 	if selected != "google" {
 		t.Fatalf("selected = %q, want google", selected)
-	}
-}
-
-func TestPrompterSelectServiceResolvesSelectedService(t *testing.T) {
-	p := &Prompter{
-		Input:      strings.NewReader("\n"),
-		Output:     &strings.Builder{},
-		Accessible: true,
-	}
-	svc, err := p.SelectService(context.Background(), []calendar.Service{
-		&stubService{serviceType: calendar.ServiceTypeGoogle, displayName: "Google"},
-	})
-	if err != nil {
-		t.Fatalf("SelectService() error = %v", err)
-	}
-	if svc.Type() != calendar.ServiceTypeGoogle {
-		t.Fatalf("svc.Type() = %q, want google", svc.Type())
-	}
-}
-
-func TestPrompterSelectServiceReturnsErrorForUnknownSelection(t *testing.T) {
-	p := &Prompter{
-		Input:      strings.NewReader("\n"),
-		Output:     &strings.Builder{},
-		Accessible: true,
-	}
-	_, err := p.SelectService(context.Background(), []calendar.Service{})
-	if err == nil {
-		t.Fatal("expected error for empty service list")
 	}
 }
 

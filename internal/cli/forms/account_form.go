@@ -8,36 +8,23 @@ import (
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 )
 
-// AccountFieldsInput holds default values for an account fields form.
-type AccountFieldsInput struct {
+// AccountFieldsData holds account name, settings, and secrets for form input/output.
+type AccountFieldsData struct {
 	Name     string
 	Settings map[string]string
 	Secrets  map[string]string
 }
 
-// AccountFieldsResult holds the output of an account fields form.
-type AccountFieldsResult struct {
-	Name     string
-	Settings map[string]string
-	Secrets  map[string]string
-}
-
-// NewAccountFieldsForm builds a huh.Form from field metadata.
-// Call the returned commit function after the form runs successfully
-// to populate result with trimmed values.
+// NewAccountFieldsForm builds a huh.Form from field metadata and returns the form
+// plus a function that outputs the populated data after the form runs.
+//
+// The form uses intermediate *string bindings because Go does not allow taking
+// the address of a map element, which huh.Input.Value requires.
 func NewAccountFieldsForm(
 	fields []calendar.AccountField,
-	defaults AccountFieldsInput,
-	result *AccountFieldsResult,
+	defaults AccountFieldsData,
 	validateName func(string) error,
-) (*huh.Form, func()) {
-	if result.Settings == nil {
-		result.Settings = make(map[string]string)
-	}
-	if result.Secrets == nil {
-		result.Secrets = make(map[string]string)
-	}
-
+) (*huh.Form, func() AccountFieldsData) {
 	// Bind field values to stable pointers so the form can update them.
 	fieldValues := make(map[string]*string, len(fields))
 	for _, field := range fields {
@@ -55,13 +42,13 @@ func NewAccountFieldsForm(
 		fieldValues[field.Key] = &s
 	}
 
-	result.Name = defaults.Name
+	name := defaults.Name
 
 	groupFields := []huh.Field{
 		huh.NewInput().
 			Title("Account name").
 			Placeholder("Work").
-			Value(&result.Name).
+			Value(&name).
 			Validate(func(v string) error {
 				return validateName(strings.TrimSpace(v))
 			}),
@@ -97,17 +84,22 @@ func NewAccountFieldsForm(
 
 	form := huh.NewForm(huh.NewGroup(groupFields...))
 
-	commit := func() {
-		result.Name = strings.TrimSpace(result.Name)
+	output := func() AccountFieldsData {
+		data := AccountFieldsData{
+			Name:     strings.TrimSpace(name),
+			Settings: make(map[string]string),
+			Secrets:  make(map[string]string),
+		}
 		for _, field := range fields {
 			val := strings.TrimSpace(*fieldValues[field.Key])
 			if field.Secret {
-				result.Secrets[field.Key] = val
+				data.Secrets[field.Key] = val
 			} else {
-				result.Settings[field.Key] = val
+				data.Settings[field.Key] = val
 			}
 		}
+		return data
 	}
 
-	return form, commit
+	return form, output
 }

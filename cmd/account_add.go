@@ -13,7 +13,7 @@ import (
 
 type accountAddPrompter interface {
 	SelectService(ctx context.Context, services []calendar.Service) (calendar.Service, error)
-	PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults forms.AccountFieldsInput, validateName func(string) error) (forms.AccountFieldsResult, error)
+	PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults forms.AccountFieldsData, validateName func(string) error) (forms.AccountFieldsData, error)
 	SelectCalendars(ctx context.Context, accountName string, calendars []calendar.Calendar, preselected []string) ([]calendar.CalendarRef, error)
 	ConfirmEmptyCalendars(ctx context.Context, accountName string) error
 }
@@ -78,7 +78,7 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return err
 	}
 
-	input, err := prompter.PromptAccountFields(ctx, service.AccountFields(), forms.AccountFieldsInput{}, func(name string) error {
+	input, err := prompter.PromptAccountFields(ctx, service.AccountFields(), forms.AccountFieldsData{}, func(name string) error {
 		return validateNewAccountName(cfg, name)
 	})
 	if err != nil {

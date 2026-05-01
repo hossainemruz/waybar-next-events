@@ -19,7 +19,7 @@ func TestRunAccountAddDelegatesToAppService(t *testing.T) {
 	registry := newAppRegistry()
 	prompter := &stubAccountAddPrompter{
 		selectedService: &stubService{},
-		accountResult: forms.AccountFieldsResult{
+		accountResult: forms.AccountFieldsData{
 			Name:     "Work",
 			Settings: map[string]string{"client_id": "client-id"},
 			Secrets:  map[string]string{"client_secret": "client-secret"},
@@ -86,16 +86,15 @@ func TestAccountAddFormRejectsDuplicateAccountName(t *testing.T) {
 		{Key: "client_secret", Label: "OAuth Client Secret", Required: true, Secret: true},
 	}
 
-	var result forms.AccountFieldsResult
 	out := &strings.Builder{}
-	form, commit := forms.NewAccountFieldsForm(fields, forms.AccountFieldsInput{}, &result, func(name string) error {
+	form, output := forms.NewAccountFieldsForm(fields, forms.AccountFieldsData{}, func(name string) error {
 		return validateNewAccountName(cfg, name)
 	})
 	form = form.WithAccessible(true).WithInput(strings.NewReader("Work\nPersonal\nclient-id\nclient-secret\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	commit()
+	result := output()
 	if result.Name != "Personal" {
 		t.Fatalf("result.Name = %q, want Personal", result.Name)
 	}
@@ -104,7 +103,7 @@ func TestAccountAddFormRejectsDuplicateAccountName(t *testing.T) {
 type stubAccountAddPrompter struct {
 	selectedService             calendar.Service
 	selectServiceErr            error
-	accountResult               forms.AccountFieldsResult
+	accountResult               forms.AccountFieldsData
 	accountErr                  error
 	selectedCalendars           []calendar.CalendarRef
 	calendarSelectionErr        error
@@ -120,9 +119,9 @@ func (s *stubAccountAddPrompter) SelectService(context.Context, []calendar.Servi
 	return s.selectedService, nil
 }
 
-func (s *stubAccountAddPrompter) PromptAccountFields(context.Context, []calendar.AccountField, forms.AccountFieldsInput, func(string) error) (forms.AccountFieldsResult, error) {
+func (s *stubAccountAddPrompter) PromptAccountFields(context.Context, []calendar.AccountField, forms.AccountFieldsData, func(string) error) (forms.AccountFieldsData, error) {
 	if s.accountErr != nil {
-		return forms.AccountFieldsResult{}, s.accountErr
+		return forms.AccountFieldsData{}, s.accountErr
 	}
 	return s.accountResult, nil
 }

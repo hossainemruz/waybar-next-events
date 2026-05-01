@@ -12,13 +12,12 @@ func TestNewAccountFieldsFormReturnsNonNil(t *testing.T) {
 	fields := []calendar.AccountField{
 		{Key: "client_id", Label: "OAuth Client ID", Required: true},
 	}
-	var result AccountFieldsResult
-	form, commit := NewAccountFieldsForm(fields, AccountFieldsInput{}, &result, func(string) error { return nil })
+	form, output := NewAccountFieldsForm(fields, AccountFieldsData{}, func(string) error { return nil })
 	if form == nil {
 		t.Fatal("expected non-nil form")
 	}
-	if commit == nil {
-		t.Fatal("expected non-nil commit function")
+	if output == nil {
+		t.Fatal("expected non-nil output function")
 	}
 }
 
@@ -34,14 +33,13 @@ func TestAccountFieldsFormValidatesName(t *testing.T) {
 		return nil
 	}
 
-	var result AccountFieldsResult
 	out := &strings.Builder{}
-	form, commit := NewAccountFieldsForm(fields, AccountFieldsInput{}, &result, validateName)
+	form, output := NewAccountFieldsForm(fields, AccountFieldsData{}, validateName)
 	form = form.WithAccessible(true).WithInput(strings.NewReader("Work\nPersonal\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	commit()
+	result := output()
 	if result.Name != "Personal" {
 		t.Fatalf("result.Name = %q, want Personal", result.Name)
 	}
@@ -56,14 +54,13 @@ func TestAccountFieldsFormRejectsEmptyName(t *testing.T) {
 		return nil
 	}
 
-	var result AccountFieldsResult
 	out := &strings.Builder{}
-	form, commit := NewAccountFieldsForm(fields, AccountFieldsInput{}, &result, validateName)
+	form, output := NewAccountFieldsForm(fields, AccountFieldsData{}, validateName)
 	form = form.WithAccessible(true).WithInput(strings.NewReader("\nValid\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	commit()
+	result := output()
 	if result.Name != "Valid" {
 		t.Fatalf("result.Name = %q, want Valid", result.Name)
 	}
@@ -74,21 +71,20 @@ func TestAccountFieldsFormPreservesDefaults(t *testing.T) {
 		{Key: "client_id", Label: "OAuth Client ID", Required: true},
 		{Key: "client_secret", Label: "OAuth Client Secret", Required: true, Secret: true},
 	}
-	defaults := AccountFieldsInput{
+	defaults := AccountFieldsData{
 		Name:     "Work",
 		Settings: map[string]string{"client_id": "old-id"},
 		Secrets:  map[string]string{"client_secret": "old-secret"},
 	}
 	validateName := func(string) error { return nil }
 
-	var result AccountFieldsResult
 	out := &strings.Builder{}
-	form, commit := NewAccountFieldsForm(fields, defaults, &result, validateName)
+	form, output := NewAccountFieldsForm(fields, defaults, validateName)
 	form = form.WithAccessible(true).WithInput(strings.NewReader("\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	commit()
+	result := output()
 	if result.Name != "Work" {
 		t.Fatalf("result.Name = %q, want Work", result.Name)
 	}
@@ -104,14 +100,13 @@ func TestAccountFieldsFormTrimsName(t *testing.T) {
 	fields := []calendar.AccountField{}
 	validateName := func(string) error { return nil }
 
-	var result AccountFieldsResult
 	out := &strings.Builder{}
-	form, commit := NewAccountFieldsForm(fields, AccountFieldsInput{}, &result, validateName)
+	form, output := NewAccountFieldsForm(fields, AccountFieldsData{}, validateName)
 	form = form.WithAccessible(true).WithInput(strings.NewReader("  Work  \n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	commit()
+	result := output()
 	if result.Name != "Work" {
 		t.Fatalf("result.Name = %q, want Work", result.Name)
 	}

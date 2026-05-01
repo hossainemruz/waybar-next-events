@@ -15,7 +15,7 @@ import (
 
 type accountUpdatePrompter interface {
 	SelectAccount(ctx context.Context, accounts []calendar.Account, title string) (string, error)
-	PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults forms.AccountFieldsInput, validateName func(string) error) (forms.AccountFieldsResult, error)
+	PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults forms.AccountFieldsData, validateName func(string) error) (forms.AccountFieldsData, error)
 	SelectCalendars(ctx context.Context, accountName string, calendars []calendar.Calendar, preselected []string) ([]calendar.CalendarRef, error)
 	ConfirmEmptyCalendars(ctx context.Context, accountName string) error
 }
@@ -134,8 +134,8 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 	return nil
 }
 
-func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountField, store secrets.Store, account *appconfig.Account) (forms.AccountFieldsInput, error) {
-	defaults := forms.AccountFieldsInput{
+func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountField, store secrets.Store, account *appconfig.Account) (forms.AccountFieldsData, error) {
+	defaults := forms.AccountFieldsData{
 		Name:     account.Name,
 		Settings: make(map[string]string),
 		Secrets:  make(map[string]string),
@@ -147,7 +147,7 @@ func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountFiel
 				if errors.Is(err, secrets.ErrSecretNotFound) {
 					continue
 				}
-				return forms.AccountFieldsInput{}, fmt.Errorf("load stored secret %q: %w", field.Key, err)
+				return forms.AccountFieldsData{}, fmt.Errorf("load stored secret %q: %w", field.Key, err)
 			}
 			defaults.Secrets[field.Key] = value
 		} else {

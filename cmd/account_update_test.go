@@ -22,7 +22,7 @@ func TestRunAccountUpdateDelegatesToAppService(t *testing.T) {
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
 	prompter := &stubAccountUpdatePrompter{
 		selectedAccountID: "work-id",
-		accountResult: forms.AccountFieldsResult{
+		accountResult: forms.AccountFieldsData{
 			Name:     "Work Updated",
 			Settings: map[string]string{"client_id": "new-client"},
 			Secrets:  map[string]string{"client_secret": "new-secret"},
@@ -91,22 +91,21 @@ func TestUpdateAccountFormRejectsDuplicateRenameButAllowsCurrentName(t *testing.
 		{Key: "client_id", Label: "OAuth Client ID", Required: true},
 		{Key: "client_secret", Label: "OAuth Client Secret", Required: true, Secret: true},
 	}
-	defaults := forms.AccountFieldsInput{
+	defaults := forms.AccountFieldsData{
 		Name:     "Work",
 		Settings: map[string]string{"client_id": "work-client"},
 		Secrets:  map[string]string{"client_secret": "work-secret"},
 	}
 
-	var result forms.AccountFieldsResult
 	out := &strings.Builder{}
-	form, commit := forms.NewAccountFieldsForm(fields, defaults, &result, func(name string) error {
+	form, output := forms.NewAccountFieldsForm(fields, defaults, func(name string) error {
 		return validateUpdatedAccountName(cfg, "Work", name)
 	})
 	form = form.WithAccessible(true).WithInput(strings.NewReader("Personal\nWork Updated\nwork-client\nwork-secret\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	commit()
+	result := output()
 	if result.Name != "Work Updated" {
 		t.Fatalf("result.Name = %q, want Work Updated", result.Name)
 	}
@@ -118,7 +117,7 @@ func TestUpdateAccountFormRejectsDuplicateRenameButAllowsCurrentName(t *testing.
 type stubAccountUpdatePrompter struct {
 	selectedAccountID      string
 	selectionErr           error
-	accountResult          forms.AccountFieldsResult
+	accountResult          forms.AccountFieldsData
 	accountErr             error
 	preselectedCalendarIDs []string
 	selectedCalendars      []calendar.CalendarRef
@@ -134,9 +133,9 @@ func (s *stubAccountUpdatePrompter) SelectAccount(context.Context, []calendar.Ac
 	return s.selectedAccountID, nil
 }
 
-func (s *stubAccountUpdatePrompter) PromptAccountFields(context.Context, []calendar.AccountField, forms.AccountFieldsInput, func(string) error) (forms.AccountFieldsResult, error) {
+func (s *stubAccountUpdatePrompter) PromptAccountFields(context.Context, []calendar.AccountField, forms.AccountFieldsData, func(string) error) (forms.AccountFieldsData, error) {
 	if s.accountErr != nil {
-		return forms.AccountFieldsResult{}, s.accountErr
+		return forms.AccountFieldsData{}, s.accountErr
 	}
 	return s.accountResult, nil
 }

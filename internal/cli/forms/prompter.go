@@ -26,7 +26,11 @@ func (p *Prompter) SelectService(ctx context.Context, services []calendar.Servic
 		return nil, fmt.Errorf("no services available")
 	}
 	var selected string
-	form := p.configure(NewServiceSelectForm(services, &selected))
+	form, err := NewServiceSelectForm(services, &selected)
+	if err != nil {
+		return nil, err
+	}
+	form = p.configure(form)
 	if err := form.RunWithContext(ctx); err != nil {
 		return nil, err
 	}
@@ -39,21 +43,23 @@ func (p *Prompter) SelectService(ctx context.Context, services []calendar.Servic
 }
 
 // PromptAccountFields prompts for account name and provider fields.
-func (p *Prompter) PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults AccountFieldsInput, validateName func(string) error) (AccountFieldsResult, error) {
-	var result AccountFieldsResult
-	form, commit := NewAccountFieldsForm(fields, defaults, &result, validateName)
+func (p *Prompter) PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults AccountFieldsData, validateName func(string) error) (AccountFieldsData, error) {
+	form, output := NewAccountFieldsForm(fields, defaults, validateName)
 	form = p.configure(form)
 	if err := form.RunWithContext(ctx); err != nil {
-		return AccountFieldsResult{}, err
+		return AccountFieldsData{}, err
 	}
-	commit()
-	return result, nil
+	return output(), nil
 }
 
 // SelectAccount prompts the user to choose an account.
 func (p *Prompter) SelectAccount(ctx context.Context, accounts []calendar.Account, title string) (string, error) {
 	var selected string
-	form := p.configure(NewAccountSelectForm(accounts, title, &selected))
+	form, err := NewAccountSelectForm(accounts, title, &selected)
+	if err != nil {
+		return "", err
+	}
+	form = p.configure(form)
 	if err := form.RunWithContext(ctx); err != nil {
 		return "", err
 	}

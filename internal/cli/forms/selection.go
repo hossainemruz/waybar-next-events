@@ -9,7 +9,10 @@ import (
 )
 
 // NewServiceSelectForm builds a form for selecting a calendar service.
-func NewServiceSelectForm(services []calendar.Service, selected *string) *huh.Form {
+func NewServiceSelectForm(services []calendar.Service, selected *string) (*huh.Form, error) {
+	if selected == nil {
+		return nil, fmt.Errorf("forms: selected pointer must not be nil")
+	}
 	options := make([]huh.Option[string], len(services))
 	for i, svc := range services {
 		options[i] = huh.NewOption(svc.DisplayName(), string(svc.Type()))
@@ -25,13 +28,16 @@ func NewServiceSelectForm(services []calendar.Service, selected *string) *huh.Fo
 				Options(options...).
 				Value(selected),
 		),
-	)
+	), nil
 }
 
 // NewAccountSelectForm builds a form for selecting an account.
-func NewAccountSelectForm(accounts []calendar.Account, title string, selected *string) *huh.Form {
+func NewAccountSelectForm(accounts []calendar.Account, title string, selected *string) (*huh.Form, error) {
+	if selected == nil {
+		return nil, fmt.Errorf("forms: selected pointer must not be nil")
+	}
 	if len(accounts) == 0 {
-		return huh.NewForm()
+		return huh.NewForm(), nil
 	}
 	if *selected == "" {
 		*selected = accounts[0].ID
@@ -53,5 +59,5 @@ func NewAccountSelectForm(accounts []calendar.Account, title string, selected *s
 				Options(options...).
 				Value(selected),
 		),
-	)
+	), nil
 }
