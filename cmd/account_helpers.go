@@ -1,21 +1,13 @@
 package cmd
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"charm.land/huh/v2"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 )
 
-const (
-	noAccountsConfiguredHint = "add an account first"
-	googleClientSecretKey    = "client_secret"
-)
+const noAccountsConfiguredHint = "add an account first"
 
 func loadConfigOrEmpty(loader *appconfig.Loader) (*appconfig.Config, error) {
 	cfg, err := loader.LoadOrEmpty()
@@ -67,92 +59,28 @@ func findAccountByID(cfg *appconfig.Config, id string) (*appconfig.Account, erro
 	return account, nil
 }
 
-func accountSelectionOptions(cfg *appconfig.Config) []huh.Option[string] {
-	if cfg == nil {
+func validateNewAccountName(cfg *appconfig.Config, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("account name is required")
+	}
+
+	if err := ensureAccountNameAvailable(cfg, trimmed); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateUpdatedAccountName(cfg *appconfig.Config, currentAccountName string, value string) error {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fmt.Errorf("account name is required")
+	}
+
+	if trimmed == currentAccountName {
 		return nil
 	}
 
-	accounts := cfg.Accounts
-	options := make([]huh.Option[string], 0, len(accounts))
-	for i, account := range accounts {
-		options = append(options, huh.NewOption(accountSelectionLabel(account, i), account.ID))
-	}
-
-	return options
-}
-
-func promptAccountSelection(ctx context.Context, prompter *huhAccountAddPrompter, cfg *appconfig.Config, title string) (string, error) {
-	accounts := cfg.Accounts
-	selectedAccountID := accounts[0].ID
-
-	form := prompter.configureForm(
-		huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title(title).
-					Options(accountSelectionOptions(cfg)...).
-					Value(&selectedAccountID),
-			),
-		),
-	)
-
-	if err := form.RunWithContext(ctx); err != nil {
-		return "", err
-	}
-
-	return selectedAccountID, nil
-}
-
-func accountSelectionLabel(account appconfig.Account, index int) string {
-	if strings.TrimSpace(account.Name) != "" {
-		return account.Name
-	}
-
-	return fmt.Sprintf("Account %d", index+1)
-}
-
-func requiredInput(fieldName string) func(string) error {
-	return func(value string) error {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("%s is required", fieldName)
-		}
-		return nil
-	}
-}
-
-func selectedCalendars(discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) []appconfig.CalendarRef {
-	selected := make(map[string]struct{}, len(selectedCalendarIDs))
-	for _, id := range selectedCalendarIDs {
-		selected[id] = struct{}{}
-	}
-
-	selectedCalendars := make([]appconfig.CalendarRef, 0, len(selectedCalendarIDs))
-	for _, discoveredCalendar := range discovered {
-		if _, ok := selected[discoveredCalendar.Calendar.ID]; !ok {
-			continue
-		}
-		selectedCalendars = append(selectedCalendars, discoveredCalendar.Calendar)
-	}
-
-	if len(selectedCalendars) == 0 {
-		return []appconfig.CalendarRef{}
-	}
-
-	return selectedCalendars
-}
-
-func loadGoogleClientSecret(ctx context.Context, store secrets.Store, account *appconfig.Account) (string, error) {
-	if account == nil {
-		return "", fmt.Errorf("account cannot be nil")
-	}
-
-	value, err := store.Get(ctx, account.ID, googleClientSecretKey)
-	if err != nil {
-		if errors.Is(err, secrets.ErrSecretNotFound) {
-			return "", fmt.Errorf("missing stored secret %q", googleClientSecretKey)
-		}
-		return "", fmt.Errorf("failed to load stored secret %q: %w", googleClientSecretKey, err)
-	}
-
-	return value, nil
+	return ensureAccountNameAvailable(cfg, trimmed)
 }

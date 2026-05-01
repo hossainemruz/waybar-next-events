@@ -2,33 +2,27 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
-	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/cli/forms"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
 
-type accountUpdateInput struct {
-	Name         string
-	ClientID     string
-	ClientSecret string
-}
-
 type accountUpdatePrompter interface {
-	PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error)
-	PromptAccountDetails(ctx context.Context, cfg *appconfig.Config, input accountUpdateInput) (accountUpdateInput, error)
-	PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.CalendarRef, error)
-	ShowNoCalendarsFound(ctx context.Context, accountName string) error
+	SelectAccount(ctx context.Context, accounts []calendar.Account, title string) (string, error)
+	PromptAccountFields(ctx context.Context, fields []calendar.AccountField, defaults forms.AccountFieldsInput, validateName func(string) error) (forms.AccountFieldsResult, error)
+	SelectCalendars(ctx context.Context, accountName string, calendars []calendar.Calendar, preselected []string) ([]calendar.CalendarRef, error)
+	ConfirmEmptyCalendars(ctx context.Context, accountName string) error
 }
 
 type accountUpdateDependencies struct {
 	newLoader      func() *appconfig.Loader
+	newRegistry    func() *calendar.Registry
 	newPrompter    func(cmd *cobra.Command) accountUpdatePrompter
 	newSecretStore func() secrets.Store
 	updateAccount  func(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error)
@@ -38,12 +32,11 @@ var defaultAccountUpdateDependencies = accountUpdateDependencies{
 	newLoader: func() *appconfig.Loader {
 		return appconfig.NewLoader()
 	},
+	newRegistry: newAppRegistry,
 	newPrompter: func(cmd *cobra.Command) accountUpdatePrompter {
-		return &huhAccountUpdatePrompter{
-			huhAccountAddPrompter: &huhAccountAddPrompter{
-				input:  cmd.InOrStdin(),
-				output: cmd.ErrOrStderr(),
-			},
+		return &forms.Prompter{
+			Input:  cmd.InOrStdin(),
+			Output: cmd.ErrOrStderr(),
 		}
 	},
 	newSecretStore: func() secrets.Store { return secrets.NewKeyringStore() },
@@ -52,11 +45,11 @@ var defaultAccountUpdateDependencies = accountUpdateDependencies{
 	},
 }
 
-// accountUpdateCmd updates an existing Google Calendar account via an interactive form.
+// accountUpdateCmd updates an existing calendar account via an interactive form.
 var accountUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update an existing Google Calendar account",
-	Long:  "Interactively update an existing Google Calendar account by selecting an account, editing credentials, re-authenticating, and adjusting calendar selections.",
+	Short: "Update an existing calendar account",
+	Long:  "Interactively update an existing calendar account by selecting an account, editing credentials, re-authenticating, and adjusting calendar selections.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAccountUpdate(cmd, defaultAccountUpdateDependencies)
 	},
@@ -82,10 +75,12 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return err
 	}
 
+	registry := deps.newRegistry()
 	prompter := deps.newPrompter(cmd)
-	selectedAccountID, err := prompter.PromptAccountSelection(ctx, cfg)
+
+	selectedAccountID, err := prompter.SelectAccount(ctx, cfg.Accounts, "Select an account to update")
 	if err != nil {
-		if isUserAbort(err) {
+		if forms.IsUserAbort(err) {
 			return nil
 		}
 		return err
@@ -95,18 +90,23 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 	if err != nil {
 		return err
 	}
-	secretStore := deps.newSecretStore()
-	originalClientSecret, err := loadGoogleClientSecret(ctx, secretStore, originalAccount)
+
+	service, err := registry.Service(originalAccount.Service)
 	if err != nil {
 		return err
 	}
-	input, err := prompter.PromptAccountDetails(ctx, cfg, accountUpdateInput{
-		Name:         originalAccount.Name,
-		ClientID:     originalAccount.Setting("client_id"),
-		ClientSecret: originalClientSecret,
+
+	secretStore := deps.newSecretStore()
+	defaults, err := loadAccountFieldDefaults(ctx, service.AccountFields(), secretStore, originalAccount)
+	if err != nil {
+		return err
+	}
+
+	input, err := prompter.PromptAccountFields(ctx, service.AccountFields(), defaults, func(name string) error {
+		return validateUpdatedAccountName(cfg, originalAccount.Name, name)
 	})
 	if err != nil {
-		if isUserAbort(err) {
+		if forms.IsUserAbort(err) {
 			return nil
 		}
 		return err
@@ -114,17 +114,17 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 
 	updatedAccount, err := deps.updateAccount(ctx, app.UpdateAccountInput{
 		AccountID: originalAccount.ID,
-		Name:      strings.TrimSpace(input.Name),
-		Settings:  mergeUpdatedSettings(originalAccount.Settings, map[string]string{"client_id": strings.TrimSpace(input.ClientID)}),
-		Secrets:   map[string]string{googleClientSecretKey: strings.TrimSpace(input.ClientSecret)},
+		Name:      input.Name,
+		Settings:  input.Settings,
+		Secrets:   input.Secrets,
 		CalendarSelector: updateCalendarSelector{
 			accountName:         input.Name,
 			prompter:            prompter,
-			selectedCalendarIDs: currentCalendarIDs(*originalAccount),
+			selectedCalendarIDs: originalAccount.CalendarIDs(),
 		},
 	})
 	if err != nil {
-		if isUserAbort(err) {
+		if forms.IsUserAbort(err) {
 			return nil
 		}
 		return err
@@ -134,131 +134,28 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 	return nil
 }
 
-type huhAccountUpdatePrompter struct {
-	*huhAccountAddPrompter
-}
-
-func (p *huhAccountUpdatePrompter) PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error) {
-	return promptAccountSelection(ctx, p.huhAccountAddPrompter, cfg, "Select an account to update")
-}
-
-func (p *huhAccountUpdatePrompter) PromptAccountDetails(ctx context.Context, cfg *appconfig.Config, input accountUpdateInput) (accountUpdateInput, error) {
-	form := p.configureForm(newUpdateAccountDetailsForm(&input, cfg))
-	if err := form.RunWithContext(ctx); err != nil {
-		return accountUpdateInput{}, err
+func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountField, store secrets.Store, account *appconfig.Account) (forms.AccountFieldsInput, error) {
+	defaults := forms.AccountFieldsInput{
+		Name:     account.Name,
+		Settings: make(map[string]string),
+		Secrets:  make(map[string]string),
 	}
-
-	input.Name = strings.TrimSpace(input.Name)
-	input.ClientID = strings.TrimSpace(input.ClientID)
-	input.ClientSecret = strings.TrimSpace(input.ClientSecret)
-
-	return input, nil
+	for _, field := range fields {
+		if field.Secret {
+			value, err := store.Get(ctx, account.ID, field.Key)
+			if err != nil {
+				if errors.Is(err, secrets.ErrSecretNotFound) {
+					continue
+				}
+				return forms.AccountFieldsInput{}, fmt.Errorf("load stored secret %q: %w", field.Key, err)
+			}
+			defaults.Secrets[field.Key] = value
+		} else {
+			defaults.Settings[field.Key] = account.Setting(field.Key)
+		}
+	}
+	return defaults, nil
 }
-
-func (p *huhAccountUpdatePrompter) PromptCalendarSelection(ctx context.Context, accountName string, discovered []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.CalendarRef, error) {
-	options := calendarSelectionOptions(discovered)
-
-	form := p.configureForm(
-		huh.NewForm(
-			huh.NewGroup(
-				huh.NewMultiSelect[string]().
-					Title(fmt.Sprintf("Select calendars for %q", accountName)).
-					Options(options...).
-					Value(&selectedCalendarIDs).
-					Height(calendarSelectionHeight(len(options))),
-			),
-		),
-	)
-
-	if err := form.RunWithContext(ctx); err != nil {
-		return nil, err
-	}
-
-	return selectedCalendars(discovered, selectedCalendarIDs), nil
-}
-
-func newUpdateAccountDetailsForm(input *accountUpdateInput, cfg *appconfig.Config) *huh.Form {
-	currentAccountName := input.Name
-
-	return huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Account name").
-				Placeholder("Work").
-				Value(&input.Name).
-				Validate(func(value string) error {
-					return validateUpdatedAccountName(cfg, currentAccountName, value)
-				}),
-			huh.NewInput().
-				Title(titleClientID).
-				Value(&input.ClientID).
-				Validate(requiredInput(titleClientID)),
-			huh.NewInput().
-				Title(titleClientSecret).
-				Value(&input.ClientSecret).
-				Validate(requiredInput(titleClientSecret)),
-		),
-	)
-}
-
-func validateUpdatedAccountName(cfg *appconfig.Config, currentAccountName string, value string) error {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return fmt.Errorf("account name is required")
-	}
-
-	if trimmed == currentAccountName {
-		return nil
-	}
-
-	return ensureAccountNameAvailable(cfg, trimmed)
-}
-
-func currentCalendarIDs(account appconfig.Account) []string {
-	if len(account.Calendars) == 0 {
-		return []string{}
-	}
-
-	calendarIDs := make([]string, 0, len(account.Calendars))
-	for _, calendar := range account.Calendars {
-		calendarIDs = append(calendarIDs, calendar.ID)
-	}
-
-	return calendarIDs
-}
-
-func cloneCalendars(calendars []appconfig.CalendarRef) []appconfig.CalendarRef {
-	if len(calendars) == 0 {
-		return []appconfig.CalendarRef{}
-	}
-
-	cloned := make([]appconfig.CalendarRef, len(calendars))
-	copy(cloned, calendars)
-	return cloned
-}
-
-func cloneSettings(settings map[string]string) map[string]string {
-	if len(settings) == 0 {
-		return map[string]string{}
-	}
-
-	cloned := make(map[string]string, len(settings))
-	for key, value := range settings {
-		cloned[key] = value
-	}
-
-	return cloned
-}
-
-func mergeUpdatedSettings(existing map[string]string, updated map[string]string) map[string]string {
-	merged := cloneSettings(existing)
-	for key, value := range updated {
-		merged[key] = value
-	}
-	return merged
-}
-
-var _ accountUpdatePrompter = (*huhAccountUpdatePrompter)(nil)
 
 type updateCalendarSelector struct {
 	accountName         string
@@ -267,9 +164,9 @@ type updateCalendarSelector struct {
 }
 
 func (s updateCalendarSelector) SelectCalendars(ctx context.Context, account calendar.Account, discovered []calendar.Calendar) ([]calendar.CalendarRef, error) {
-	return s.prompter.PromptCalendarSelection(ctx, account.Name, toDiscoveredCalendars(discovered), s.selectedCalendarIDs)
+	return s.prompter.SelectCalendars(ctx, account.Name, discovered, s.selectedCalendarIDs)
 }
 
 func (s updateCalendarSelector) ConfirmEmptyCalendars(ctx context.Context, account calendar.Account) error {
-	return s.prompter.ShowNoCalendarsFound(ctx, account.Name)
+	return s.prompter.ConfirmEmptyCalendars(ctx, account.Name)
 }

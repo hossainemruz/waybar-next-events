@@ -62,25 +62,3 @@ func TestFindAccountByIDUsesID(t *testing.T) {
 		t.Fatalf("account.Name = %q, want Mail", account.Name)
 	}
 }
-
-func TestAccountSelectionOptionsUseStableIDs(t *testing.T) {
-	cfg := &appconfig.Config{Accounts: []appconfig.Account{
-		{ID: "google-2", Service: appcalendar.ServiceTypeGoogle, Name: "Work"},
-		{ID: "other-1", Service: appcalendar.ServiceType("outlook"), Name: "Mail"},
-		{ID: "google-1", Service: appcalendar.ServiceTypeGoogle, Name: ""},
-	}}
-
-	options := accountSelectionOptions(cfg)
-	if len(options) != 3 {
-		t.Fatalf("len(options) = %d, want 3", len(options))
-	}
-	if options[0].Value != "google-2" {
-		t.Fatalf("options[0].Value = %q, want google-2", options[0].Value)
-	}
-	if options[1].Key != "Mail" || options[1].Value != "other-1" {
-		t.Fatalf("options[1] = (%q, %q), want (Mail, other-1)", options[1].Key, options[1].Value)
-	}
-	if options[2].Key != "Account 3" || options[2].Value != "google-1" {
-		t.Fatalf("options[2] = (%q, %q), want (Account 3, google-1)", options[2].Key, options[2].Value)
-	}
-}
