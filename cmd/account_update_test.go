@@ -8,18 +8,27 @@ import (
 	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/cli/forms"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
-	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
 
 func TestRunAccountUpdateDelegatesToAppService(t *testing.T) {
 	configPath := writeGenericConfig(t, []appconfig.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}, Calendars: []appconfig.CalendarRef{{ID: "old", Name: "Old"}}}})
 	loader := appconfig.NewLoaderWithPath(configPath)
+	registry := newAppRegistry()
 	secretStore := secrets.NewInMemoryStore()
-	_ = secretStore.Set(context.Background(), "work-id", googleClientSecretKey, "old-secret")
-	prompter := &stubAccountUpdatePrompter{selectedAccountID: "work-id", updatedInput: accountUpdateInput{Name: "Work Updated", ClientID: "new-client", ClientSecret: "new-secret"}, selectedCalendars: []appconfig.CalendarRef{{ID: "new", Name: "New"}}}
+	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
+	prompter := &stubAccountUpdatePrompter{
+		selectedAccountID: "work-id",
+		accountResult: forms.AccountFieldsData{
+			Name:     "Work Updated",
+			Settings: map[string]string{"client_id": "new-client"},
+			Secrets:  map[string]string{"client_secret": "new-secret"},
+		},
+		selectedCalendars: []calendar.CalendarRef{{ID: "new", Name: "New"}},
+	}
 	stdout := &strings.Builder{}
 	cmd := newTestCommand()
 	cmd.SetOut(stdout)
@@ -27,11 +36,12 @@ func TestRunAccountUpdateDelegatesToAppService(t *testing.T) {
 	called := false
 	err := runAccountUpdate(cmd, accountUpdateDependencies{
 		newLoader:      func() *appconfig.Loader { return loader },
+		newRegistry:    func() *calendar.Registry { return registry },
 		newPrompter:    func(*cobra.Command) accountUpdatePrompter { return prompter },
 		newSecretStore: func() secrets.Store { return secretStore },
 		updateAccount: func(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error) {
 			called = true
-			if input.AccountID != "work-id" || input.Name != "Work Updated" || input.Settings["client_id"] != "new-client" || input.Secrets[googleClientSecretKey] != "new-secret" {
+			if input.AccountID != "work-id" || input.Name != "Work Updated" || input.Settings["client_id"] != "new-client" || input.Secrets["client_secret"] != "new-secret" {
 				t.Fatalf("unexpected input: %+v", input)
 			}
 			_, err := input.CalendarSelector.SelectCalendars(ctx, calendar.Account{Name: "Work Updated"}, []calendar.Calendar{{ID: "new", Name: "New"}})
@@ -50,18 +60,64 @@ func TestRunAccountUpdateDelegatesToAppService(t *testing.T) {
 	if !strings.Contains(stdout.String(), `Updated account "Work Updated".`) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if prompter.detailsInput.ClientSecret != "old-secret" {
-		t.Fatalf("detailsInput.ClientSecret = %q, want old-secret", prompter.detailsInput.ClientSecret)
-	}
 	if len(prompter.preselectedCalendarIDs) != 1 || prompter.preselectedCalendarIDs[0] != "old" {
 		t.Fatalf("preselectedCalendarIDs = %+v, want [old]", prompter.preselectedCalendarIDs)
 	}
 }
 
+func TestRunAccountUpdatePreservesUnknownSettings(t *testing.T) {
+	configPath := writeGenericConfig(t, []appconfig.Account{{
+		ID:        "work-id",
+		Service:   calendar.ServiceTypeGoogle,
+		Name:      "Work",
+		Settings:  map[string]string{"client_id": "old-client", "region": "us-east"},
+		Calendars: []appconfig.CalendarRef{{ID: "old", Name: "Old"}},
+	}})
+	loader := appconfig.NewLoaderWithPath(configPath)
+	registry := newAppRegistry()
+	secretStore := secrets.NewInMemoryStore()
+	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
+	prompter := &stubAccountUpdatePrompter{
+		selectedAccountID: "work-id",
+		accountResult: forms.AccountFieldsData{
+			Name:     "Work",
+			Settings: map[string]string{"client_id": "new-client"},
+			Secrets:  map[string]string{"client_secret": "new-secret"},
+		},
+		selectedCalendars: []appconfig.CalendarRef{{ID: "old", Name: "Old"}},
+	}
+
+	var receivedSettings map[string]string
+	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+		newLoader:      func() *appconfig.Loader { return loader },
+		newRegistry:    func() *calendar.Registry { return registry },
+		newPrompter:    func(*cobra.Command) accountUpdatePrompter { return prompter },
+		newSecretStore: func() secrets.Store { return secretStore },
+		updateAccount: func(_ context.Context, input app.UpdateAccountInput) (calendar.Account, error) {
+			receivedSettings = input.Settings
+			return calendar.Account{Name: "Work"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountUpdate() error = %v", err)
+	}
+	if receivedSettings == nil {
+		t.Fatal("expected updateAccount to be called")
+	}
+	if receivedSettings["client_id"] != "new-client" {
+		t.Fatalf("Settings[client_id] = %q, want new-client", receivedSettings["client_id"])
+	}
+	if receivedSettings["region"] != "us-east" {
+		t.Fatalf("Settings[region] = %q, want us-east; unknown settings were dropped", receivedSettings["region"])
+	}
+}
+
 func TestRunAccountUpdateReturnsNilOnSelectionAbort(t *testing.T) {
 	loader := appconfig.NewLoaderWithPath(writeGenericConfig(t, []appconfig.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}))
+	registry := newAppRegistry()
 	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
-		newLoader: func() *appconfig.Loader { return loader },
+		newLoader:   func() *appconfig.Loader { return loader },
+		newRegistry: func() *calendar.Registry { return registry },
 		newPrompter: func(*cobra.Command) accountUpdatePrompter {
 			return &stubAccountUpdatePrompter{selectionErr: huh.ErrUserAborted}
 		},
@@ -78,64 +134,68 @@ func TestRunAccountUpdateReturnsNilOnSelectionAbort(t *testing.T) {
 
 func TestUpdateAccountFormRejectsDuplicateRenameButAllowsCurrentName(t *testing.T) {
 	cfg := &appconfig.Config{Accounts: []appconfig.Account{{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "Work"}, {ID: "b", Service: calendar.ServiceTypeGoogle, Name: "Personal"}}}
-	input := accountUpdateInput{Name: "Work", ClientID: "work-client", ClientSecret: "work-secret"}
+	fields := []calendar.AccountField{
+		{Key: "client_id", Label: "OAuth Client ID", Required: true},
+		{Key: "client_secret", Label: "OAuth Client Secret", Required: true, Secret: true},
+	}
+	defaults := forms.AccountFieldsData{
+		Name:     "Work",
+		Settings: map[string]string{"client_id": "work-client"},
+		Secrets:  map[string]string{"client_secret": "work-secret"},
+	}
+
 	out := &strings.Builder{}
-	form := newUpdateAccountDetailsForm(&input, cfg).WithAccessible(true).WithInput(strings.NewReader("Personal\nWork Updated\nwork-client\nwork-secret\n")).WithOutput(out)
+	form, output := forms.NewAccountFieldsForm(fields, defaults, func(name string) error {
+		return validateUpdatedAccountName(cfg, "Work", name)
+	})
+	form = form.WithAccessible(true).WithInput(strings.NewReader("Personal\nWork Updated\nwork-client\nwork-secret\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	if input.Name != "Work Updated" {
-		t.Fatalf("input.Name = %q, want Work Updated", input.Name)
+	result := output()
+	if result.Name != "Work Updated" {
+		t.Fatalf("result.Name = %q, want Work Updated", result.Name)
 	}
 	if err := validateUpdatedAccountName(cfg, "Work", "Work"); err != nil {
 		t.Fatalf("validateUpdatedAccountName() error = %v", err)
 	}
 }
 
-func TestCloneCalendarsReturnsEmptySlice(t *testing.T) {
-	cloned := cloneCalendars(nil)
-	if cloned == nil || len(cloned) != 0 {
-		t.Fatalf("cloneCalendars(nil) = %+v, want empty slice", cloned)
-	}
-}
-
 type stubAccountUpdatePrompter struct {
 	selectedAccountID      string
 	selectionErr           error
-	updatedInput           accountUpdateInput
-	detailsInput           accountUpdateInput
-	detailsErr             error
+	accountResult          forms.AccountFieldsData
+	accountErr             error
 	preselectedCalendarIDs []string
-	selectedCalendars      []appconfig.CalendarRef
+	selectedCalendars      []calendar.CalendarRef
 	calendarSelectionErr   error
 	showNoCalendarsErr     error
 	noCalendarsShown       bool
 }
 
-func (s *stubAccountUpdatePrompter) PromptAccountSelection(context.Context, *appconfig.Config) (string, error) {
+func (s *stubAccountUpdatePrompter) SelectAccount(context.Context, []calendar.Account, string) (string, error) {
 	if s.selectionErr != nil {
 		return "", s.selectionErr
 	}
 	return s.selectedAccountID, nil
 }
 
-func (s *stubAccountUpdatePrompter) PromptAccountDetails(_ context.Context, _ *appconfig.Config, input accountUpdateInput) (accountUpdateInput, error) {
-	s.detailsInput = input
-	if s.detailsErr != nil {
-		return accountUpdateInput{}, s.detailsErr
+func (s *stubAccountUpdatePrompter) PromptAccountFields(context.Context, []calendar.AccountField, forms.AccountFieldsData, func(string) error) (forms.AccountFieldsData, error) {
+	if s.accountErr != nil {
+		return forms.AccountFieldsData{}, s.accountErr
 	}
-	return s.updatedInput, nil
+	return s.accountResult, nil
 }
 
-func (s *stubAccountUpdatePrompter) PromptCalendarSelection(_ context.Context, _ string, _ []calendars.DiscoveredCalendar, selectedCalendarIDs []string) ([]appconfig.CalendarRef, error) {
-	s.preselectedCalendarIDs = append([]string(nil), selectedCalendarIDs...)
+func (s *stubAccountUpdatePrompter) SelectCalendars(_ context.Context, _ string, _ []calendar.Calendar, preselected []string) ([]calendar.CalendarRef, error) {
+	s.preselectedCalendarIDs = append([]string(nil), preselected...)
 	if s.calendarSelectionErr != nil {
 		return nil, s.calendarSelectionErr
 	}
 	return s.selectedCalendars, nil
 }
 
-func (s *stubAccountUpdatePrompter) ShowNoCalendarsFound(context.Context, string) error {
+func (s *stubAccountUpdatePrompter) ConfirmEmptyCalendars(context.Context, string) error {
 	s.noCalendarsShown = true
 	return s.showNoCalendarsErr
 }

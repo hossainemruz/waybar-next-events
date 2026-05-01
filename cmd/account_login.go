@@ -6,12 +6,13 @@ import (
 
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/cli/forms"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/spf13/cobra"
 )
 
 type accountLoginPrompter interface {
-	PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error)
+	SelectAccount(ctx context.Context, accounts []calendar.Account, title string) (string, error)
 }
 
 type accountLoginDependencies struct {
@@ -25,11 +26,9 @@ var defaultAccountLoginDependencies = accountLoginDependencies{
 		return appconfig.NewLoader()
 	},
 	newPrompter: func(cmd *cobra.Command) accountLoginPrompter {
-		return &huhAccountLoginPrompter{
-			huhAccountAddPrompter: &huhAccountAddPrompter{
-				input:  cmd.InOrStdin(),
-				output: cmd.ErrOrStderr(),
-			},
+		return &forms.Prompter{
+			Input:  cmd.InOrStdin(),
+			Output: cmd.ErrOrStderr(),
 		}
 	},
 	loginAccount: func(ctx context.Context, input app.LoginAccountInput) (calendar.Account, error) {
@@ -37,11 +36,11 @@ var defaultAccountLoginDependencies = accountLoginDependencies{
 	},
 }
 
-// accountLoginCmd re-authenticates a Google Calendar account via the browser OAuth2 flow.
+// accountLoginCmd re-authenticates a calendar account via the browser OAuth2 flow.
 var accountLoginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Re-authenticate a Google Calendar account",
-	Long:  "Interactively re-authenticate a Google Calendar account by selecting an account and completing the browser-based OAuth2 login flow.",
+	Short: "Re-authenticate a calendar account",
+	Long:  "Interactively re-authenticate a calendar account by selecting an account and completing the browser-based OAuth2 login flow.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAccountLogin(cmd, defaultAccountLoginDependencies)
 	},
@@ -68,9 +67,9 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 	}
 
 	prompter := deps.newPrompter(cmd)
-	selectedAccountID, err := prompter.PromptAccountSelection(ctx, cfg)
+	selectedAccountID, err := prompter.SelectAccount(ctx, cfg.Accounts, "Select an account to log in")
 	if err != nil {
-		if isUserAbort(err) {
+		if forms.IsUserAbort(err) {
 			return nil
 		}
 		return err
@@ -89,13 +88,3 @@ func runAccountLogin(cmd *cobra.Command, deps accountLoginDependencies) error {
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Logged in to account %q.\n", loggedInAccount.Name)
 	return nil
 }
-
-type huhAccountLoginPrompter struct {
-	*huhAccountAddPrompter
-}
-
-func (p *huhAccountLoginPrompter) PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error) {
-	return promptAccountSelection(ctx, p.huhAccountAddPrompter, cfg, "Select an account to log in")
-}
-
-var _ accountLoginPrompter = (*huhAccountLoginPrompter)(nil)

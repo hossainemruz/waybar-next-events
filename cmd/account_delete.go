@@ -4,16 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/cli/forms"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/spf13/cobra"
 )
 
 type accountDeletePrompter interface {
-	PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error)
-	PromptDeleteConfirmation(ctx context.Context, accountName string) (bool, error)
+	SelectAccount(ctx context.Context, accounts []calendar.Account, title string) (string, error)
+	ConfirmDelete(ctx context.Context, accountName string) (bool, error)
 }
 
 type accountDeleteDependencies struct {
@@ -27,11 +27,9 @@ var defaultAccountDeleteDependencies = accountDeleteDependencies{
 		return appconfig.NewLoader()
 	},
 	newPrompter: func(cmd *cobra.Command) accountDeletePrompter {
-		return &huhAccountDeletePrompter{
-			huhAccountAddPrompter: &huhAccountAddPrompter{
-				input:  cmd.InOrStdin(),
-				output: cmd.ErrOrStderr(),
-			},
+		return &forms.Prompter{
+			Input:  cmd.InOrStdin(),
+			Output: cmd.ErrOrStderr(),
 		}
 	},
 	deleteAccount: func(ctx context.Context, input app.DeleteAccountInput) (calendar.Account, error) {
@@ -39,11 +37,11 @@ var defaultAccountDeleteDependencies = accountDeleteDependencies{
 	},
 }
 
-// accountDeleteCmd deletes a Google Calendar account via an interactive confirmation flow.
+// accountDeleteCmd deletes a calendar account via an interactive confirmation flow.
 var accountDeleteCmd = &cobra.Command{
 	Use:   "delete",
-	Short: "Delete a Google Calendar account",
-	Long:  "Interactively delete a Google Calendar account by selecting an account and confirming deletion.",
+	Short: "Delete a calendar account",
+	Long:  "Interactively delete a calendar account by selecting an account and confirming deletion.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAccountDelete(cmd, defaultAccountDeleteDependencies)
 	},
@@ -70,9 +68,9 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 	}
 
 	prompter := deps.newPrompter(cmd)
-	selectedAccountID, err := prompter.PromptAccountSelection(ctx, cfg)
+	selectedAccountID, err := prompter.SelectAccount(ctx, cfg.Accounts, "Select an account to delete")
 	if err != nil {
-		if isUserAbort(err) {
+		if forms.IsUserAbort(err) {
 			return nil
 		}
 		return err
@@ -82,9 +80,9 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 	if err != nil {
 		return err
 	}
-	confirmed, err := prompter.PromptDeleteConfirmation(ctx, selectedAccount.Name)
+	confirmed, err := prompter.ConfirmDelete(ctx, selectedAccount.Name)
 	if err != nil {
-		if isUserAbort(err) {
+		if forms.IsUserAbort(err) {
 			return nil
 		}
 		return err
@@ -101,36 +99,3 @@ func runAccountDelete(cmd *cobra.Command, deps accountDeleteDependencies) error 
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Deleted account %q.\n", deletedAccount.Name)
 	return nil
 }
-
-type huhAccountDeletePrompter struct {
-	*huhAccountAddPrompter
-}
-
-func (p *huhAccountDeletePrompter) PromptAccountSelection(ctx context.Context, cfg *appconfig.Config) (string, error) {
-	return promptAccountSelection(ctx, p.huhAccountAddPrompter, cfg, "Select an account to delete")
-}
-
-func (p *huhAccountDeletePrompter) PromptDeleteConfirmation(ctx context.Context, accountName string) (bool, error) {
-	confirmed := false
-
-	form := p.configureForm(
-		huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title(fmt.Sprintf("Delete account %q?", accountName)).
-					Description("This removes the account from config and clears its stored OAuth token and secrets.").
-					Affirmative("Delete").
-					Negative("Cancel").
-					Value(&confirmed),
-			),
-		),
-	)
-
-	if err := form.RunWithContext(ctx); err != nil {
-		return false, err
-	}
-
-	return confirmed, nil
-}
-
-var _ accountDeletePrompter = (*huhAccountDeletePrompter)(nil)

@@ -64,14 +64,14 @@ type stubAccountDeletePrompter struct {
 	confirmedAccountName string
 }
 
-func (s *stubAccountDeletePrompter) PromptAccountSelection(context.Context, *appconfig.Config) (string, error) {
+func (s *stubAccountDeletePrompter) SelectAccount(context.Context, []calendar.Account, string) (string, error) {
 	if s.selectionErr != nil {
 		return "", s.selectionErr
 	}
 	return s.selectedAccountID, nil
 }
 
-func (s *stubAccountDeletePrompter) PromptDeleteConfirmation(_ context.Context, accountName string) (bool, error) {
+func (s *stubAccountDeletePrompter) ConfirmDelete(_ context.Context, accountName string) (bool, error) {
 	s.confirmedAccountName = accountName
 	if s.confirmErr != nil {
 		return false, s.confirmErr

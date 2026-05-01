@@ -64,7 +64,7 @@ type stubAccountLoginPrompter struct {
 	selectionErr      error
 }
 
-func (s *stubAccountLoginPrompter) PromptAccountSelection(context.Context, *appconfig.Config) (string, error) {
+func (s *stubAccountLoginPrompter) SelectAccount(context.Context, []calendar.Account, string) (string, error) {
 	if s.selectionErr != nil {
 		return "", s.selectionErr
 	}

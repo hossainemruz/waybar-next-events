@@ -2,20 +2,29 @@ package cmd
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
 	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/cli/forms"
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/hossainemruz/waybar-next-events/pkg/calendars"
 	"github.com/spf13/cobra"
 )
 
 func TestRunAccountAddDelegatesToAppService(t *testing.T) {
 	loader := appconfig.NewLoaderWithPath(writeGenericConfig(t, nil))
-	prompter := &stubAccountAddPrompter{accountInput: accountAddInput{Name: "Work", ClientID: "client-id", ClientSecret: "client-secret"}}
+	registry := newAppRegistry()
+	prompter := &stubAccountAddPrompter{
+		selectedService: &stubService{},
+		accountResult: forms.AccountFieldsData{
+			Name:     "Work",
+			Settings: map[string]string{"client_id": "client-id"},
+			Secrets:  map[string]string{"client_secret": "client-secret"},
+		},
+	}
 	stdout := &strings.Builder{}
 	cmd := newTestCommand()
 	cmd.SetOut(stdout)
@@ -23,10 +32,11 @@ func TestRunAccountAddDelegatesToAppService(t *testing.T) {
 	called := false
 	err := runAccountAdd(cmd, accountAddDependencies{
 		newLoader:   func() *appconfig.Loader { return loader },
+		newRegistry: func() *calendar.Registry { return registry },
 		newPrompter: func(*cobra.Command) accountAddPrompter { return prompter },
 		addAccount: func(ctx context.Context, input app.AddAccountInput) (calendar.Account, error) {
 			called = true
-			if input.Name != "Work" || input.Settings["client_id"] != "client-id" || input.Secrets[googleClientSecretKey] != "client-secret" {
+			if input.Name != "Work" || input.Settings["client_id"] != "client-id" || input.Secrets["client_secret"] != "client-secret" {
 				t.Fatalf("unexpected input: %+v", input)
 			}
 			_, err := input.CalendarSelector.SelectCalendars(ctx, calendar.Account{Name: "Work"}, []calendar.Calendar{{ID: "primary", Name: "Primary", Primary: true}})
@@ -52,10 +62,12 @@ func TestRunAccountAddDelegatesToAppService(t *testing.T) {
 
 func TestRunAccountAddReturnsNilOnUserAbort(t *testing.T) {
 	loader := appconfig.NewLoaderWithPath(writeGenericConfig(t, nil))
+	registry := newAppRegistry()
 	err := runAccountAdd(newTestCommand(), accountAddDependencies{
-		newLoader: func() *appconfig.Loader { return loader },
+		newLoader:   func() *appconfig.Loader { return loader },
+		newRegistry: func() *calendar.Registry { return registry },
 		newPrompter: func(*cobra.Command) accountAddPrompter {
-			return &stubAccountAddPrompter{accountErr: huh.ErrUserAborted}
+			return &stubAccountAddPrompter{selectServiceErr: huh.ErrUserAborted}
 		},
 		addAccount: func(context.Context, app.AddAccountInput) (calendar.Account, error) {
 			t.Fatal("addAccount should not be called")
@@ -69,35 +81,52 @@ func TestRunAccountAddReturnsNilOnUserAbort(t *testing.T) {
 
 func TestAccountAddFormRejectsDuplicateAccountName(t *testing.T) {
 	cfg := &appconfig.Config{Accounts: []appconfig.Account{{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "Work"}}}
-	var input accountAddInput
+	fields := []calendar.AccountField{
+		{Key: "client_id", Label: "OAuth Client ID", Required: true},
+		{Key: "client_secret", Label: "OAuth Client Secret", Required: true, Secret: true},
+	}
+
 	out := &strings.Builder{}
-	form := newAccountDetailsForm(&input, cfg).WithAccessible(true).WithInput(strings.NewReader("Work\nPersonal\nclient-id\nclient-secret\n")).WithOutput(out)
+	form, output := forms.NewAccountFieldsForm(fields, forms.AccountFieldsData{}, func(name string) error {
+		return validateNewAccountName(cfg, name)
+	})
+	form = form.WithAccessible(true).WithInput(strings.NewReader("Work\nPersonal\nclient-id\nclient-secret\n")).WithOutput(out)
 	if err := form.Run(); err != nil {
 		t.Fatalf("form.Run() error = %v", err)
 	}
-	if input.Name != "Personal" {
-		t.Fatalf("input.Name = %q, want Personal", input.Name)
+	result := output()
+	if result.Name != "Personal" {
+		t.Fatalf("result.Name = %q, want Personal", result.Name)
 	}
 }
 
 type stubAccountAddPrompter struct {
-	accountInput                accountAddInput
+	selectedService             calendar.Service
+	selectServiceErr            error
+	accountResult               forms.AccountFieldsData
 	accountErr                  error
-	selectedCalendars           []appconfig.CalendarRef
+	selectedCalendars           []calendar.CalendarRef
 	calendarSelectionErr        error
 	showNoCalendarsErr          error
 	noCalendarsShown            bool
 	promptedCalendarAccountName string
 }
 
-func (s *stubAccountAddPrompter) PromptAccountDetails(context.Context, *appconfig.Config) (accountAddInput, error) {
-	if s.accountErr != nil {
-		return accountAddInput{}, s.accountErr
+func (s *stubAccountAddPrompter) SelectService(context.Context, []calendar.Service) (calendar.Service, error) {
+	if s.selectServiceErr != nil {
+		return nil, s.selectServiceErr
 	}
-	return s.accountInput, nil
+	return s.selectedService, nil
 }
 
-func (s *stubAccountAddPrompter) PromptCalendarSelection(_ context.Context, accountName string, _ []calendars.DiscoveredCalendar) ([]appconfig.CalendarRef, error) {
+func (s *stubAccountAddPrompter) PromptAccountFields(context.Context, []calendar.AccountField, forms.AccountFieldsData, func(string) error) (forms.AccountFieldsData, error) {
+	if s.accountErr != nil {
+		return forms.AccountFieldsData{}, s.accountErr
+	}
+	return s.accountResult, nil
+}
+
+func (s *stubAccountAddPrompter) SelectCalendars(_ context.Context, accountName string, _ []calendar.Calendar, _ []string) ([]calendar.CalendarRef, error) {
 	s.promptedCalendarAccountName = accountName
 	if s.calendarSelectionErr != nil {
 		return nil, s.calendarSelectionErr
@@ -105,7 +134,24 @@ func (s *stubAccountAddPrompter) PromptCalendarSelection(_ context.Context, acco
 	return s.selectedCalendars, nil
 }
 
-func (s *stubAccountAddPrompter) ShowNoCalendarsFound(context.Context, string) error {
+func (s *stubAccountAddPrompter) ConfirmEmptyCalendars(context.Context, string) error {
 	s.noCalendarsShown = true
 	return s.showNoCalendarsErr
+}
+
+type stubService struct{}
+
+func (s *stubService) Type() calendar.ServiceType { return calendar.ServiceTypeGoogle }
+func (s *stubService) DisplayName() string        { return "Google" }
+func (s *stubService) AccountFields() []calendar.AccountField {
+	return []calendar.AccountField{
+		{Key: "client_id", Label: "OAuth Client ID", Required: true},
+		{Key: "client_secret", Label: "OAuth Client Secret", Required: true, Secret: true},
+	}
+}
+func (s *stubService) DiscoverCalendars(context.Context, calendar.Account, *http.Client) ([]calendar.Calendar, error) {
+	return nil, nil
+}
+func (s *stubService) FetchEvents(context.Context, calendar.Account, calendar.EventQuery, *http.Client) ([]calendar.Event, error) {
+	return nil, nil
 }
