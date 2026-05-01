@@ -65,6 +65,53 @@ func TestRunAccountUpdateDelegatesToAppService(t *testing.T) {
 	}
 }
 
+func TestRunAccountUpdatePreservesUnknownSettings(t *testing.T) {
+	configPath := writeGenericConfig(t, []appconfig.Account{{
+		ID:        "work-id",
+		Service:   calendar.ServiceTypeGoogle,
+		Name:      "Work",
+		Settings:  map[string]string{"client_id": "old-client", "region": "us-east"},
+		Calendars: []appconfig.CalendarRef{{ID: "old", Name: "Old"}},
+	}})
+	loader := appconfig.NewLoaderWithPath(configPath)
+	registry := newAppRegistry()
+	secretStore := secrets.NewInMemoryStore()
+	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
+	prompter := &stubAccountUpdatePrompter{
+		selectedAccountID: "work-id",
+		accountResult: forms.AccountFieldsData{
+			Name:     "Work",
+			Settings: map[string]string{"client_id": "new-client"},
+			Secrets:  map[string]string{"client_secret": "new-secret"},
+		},
+		selectedCalendars: []appconfig.CalendarRef{{ID: "old", Name: "Old"}},
+	}
+
+	var receivedSettings map[string]string
+	err := runAccountUpdate(newTestCommand(), accountUpdateDependencies{
+		newLoader:      func() *appconfig.Loader { return loader },
+		newRegistry:    func() *calendar.Registry { return registry },
+		newPrompter:    func(*cobra.Command) accountUpdatePrompter { return prompter },
+		newSecretStore: func() secrets.Store { return secretStore },
+		updateAccount: func(_ context.Context, input app.UpdateAccountInput) (calendar.Account, error) {
+			receivedSettings = input.Settings
+			return calendar.Account{Name: "Work"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runAccountUpdate() error = %v", err)
+	}
+	if receivedSettings == nil {
+		t.Fatal("expected updateAccount to be called")
+	}
+	if receivedSettings["client_id"] != "new-client" {
+		t.Fatalf("Settings[client_id] = %q, want new-client", receivedSettings["client_id"])
+	}
+	if receivedSettings["region"] != "us-east" {
+		t.Fatalf("Settings[region] = %q, want us-east; unknown settings were dropped", receivedSettings["region"])
+	}
+}
+
 func TestRunAccountUpdateReturnsNilOnSelectionAbort(t *testing.T) {
 	loader := appconfig.NewLoaderWithPath(writeGenericConfig(t, []appconfig.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}))
 	registry := newAppRegistry()

@@ -112,10 +112,21 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return err
 	}
 
+	// Merge form-managed settings back into the original settings so
+	// unknown provider keys (e.g. a setting not listed in AccountFields)
+	// are not dropped on update.
+	settings := make(map[string]string, len(originalAccount.Settings))
+	for k, v := range originalAccount.Settings {
+		settings[k] = v
+	}
+	for k, v := range input.Settings {
+		settings[k] = v
+	}
+
 	updatedAccount, err := deps.updateAccount(ctx, app.UpdateAccountInput{
 		AccountID: originalAccount.ID,
 		Name:      input.Name,
-		Settings:  input.Settings,
+		Settings:  settings,
 		Secrets:   input.Secrets,
 		CalendarSelector: updateCalendarSelector{
 			accountName:         input.Name,
@@ -135,24 +146,29 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 }
 
 func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountField, store secrets.Store, account *appconfig.Account) (forms.AccountFieldsData, error) {
+	// Seed all current settings so the form preserves unknown keys.
+	settings := make(map[string]string, len(account.Settings))
+	for k, v := range account.Settings {
+		settings[k] = v
+	}
+
 	defaults := forms.AccountFieldsData{
 		Name:     account.Name,
-		Settings: make(map[string]string),
+		Settings: settings,
 		Secrets:  make(map[string]string),
 	}
 	for _, field := range fields {
-		if field.Secret {
-			value, err := store.Get(ctx, account.ID, field.Key)
-			if err != nil {
-				if errors.Is(err, secrets.ErrSecretNotFound) {
-					continue
-				}
-				return forms.AccountFieldsData{}, fmt.Errorf("load stored secret %q: %w", field.Key, err)
-			}
-			defaults.Secrets[field.Key] = value
-		} else {
-			defaults.Settings[field.Key] = account.Setting(field.Key)
+		if !field.Secret {
+			continue
 		}
+		value, err := store.Get(ctx, account.ID, field.Key)
+		if err != nil {
+			if errors.Is(err, secrets.ErrSecretNotFound) {
+				continue
+			}
+			return forms.AccountFieldsData{}, fmt.Errorf("load stored secret %q: %w", field.Key, err)
+		}
+		defaults.Secrets[field.Key] = value
 	}
 	return defaults, nil
 }
