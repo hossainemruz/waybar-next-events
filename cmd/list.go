@@ -3,21 +3,22 @@ package cmd
 import (
 	"context"
 	"fmt"
-
 	"time"
 
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
-	"github.com/hossainemruz/waybar-next-events/pkg/types"
+	"github.com/hossainemruz/waybar-next-events/internal/output"
 	"github.com/spf13/cobra"
 )
 
 var listLimit int
 
 type listDependencies struct {
+	now         func() time.Time
 	fetchEvents func(cmd *cobra.Command, query calendar.EventQuery, limit int) ([]calendar.Event, error)
 }
 
 var defaultListDependencies = listDependencies{
+	now: time.Now,
 	fetchEvents: func(cmd *cobra.Command, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
 		return newEventFetcher().Fetch(cmd.Context(), query, limit)
 	},
@@ -39,16 +40,19 @@ func runList(cmd *cobra.Command, deps listDependencies) error {
 		cmd.SetContext(ctx)
 	}
 
-	events, err := deps.fetchEvents(cmd, calendar.EventQuery{Now: time.Now(), DayLimit: 4}, listLimit)
+	now := deps.now()
+	events, err := deps.fetchEvents(cmd, calendar.EventQuery{Now: now, DayLimit: 4}, listLimit)
 	if err != nil {
 		return err
 	}
-	data := types.Result{
-		Events: events,
+
+	payload, err := output.Render(events, now)
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "{\"text\": \" Something went wrong!\", \"tooltip\": \"%s\"}\n", err)
+		return nil
 	}
-	if err := data.Print(); err != nil {
-		fmt.Printf("{\"text\": \" Something went wrong!\", \"tooltip\": \"%s\"}\n", err)
-	}
+
+	_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(payload))
 	return nil
 }
 

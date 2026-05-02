@@ -1,38 +1,38 @@
-package types
+package output
 
 import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 )
 
-type waybarOutput struct {
+// WaybarPayload is the JSON shape emitted by Render.
+type WaybarPayload struct {
 	Text    string `json:"text"`
 	Tooltip string `json:"tooltip"`
 }
 
-type Result struct {
-	Events []Event
-}
+// Render formats the given events as Waybar JSON output for the given point in time.
+// Events must already be sorted by start time (ascending); the caller (e.g. EventFetcher)
+// is responsible for ordering. The returned bytes are the JSON payload; the caller decides
+// how to emit them.
+func Render(events []calendar.Event, now time.Time) ([]byte, error) {
+	groups := groupEventsByDay(events, now)
 
-func (r *Result) Print() error {
-	now := time.Now()
-	groups := groupEventsByDay(r.Events, now)
-
-	output := waybarOutput{}
+	payload := WaybarPayload{}
 
 	// --- Determine Text (bar display) ---
-	// Find today's events from the grouped data
-	var todayEvents []Event
+	var todayEvents []calendar.Event
 	if len(groups) > 0 && groups[0].Day == "Today" {
 		todayEvents = groups[0].Events
 	}
 
 	// Find ongoing event (skip all-day events; if multiple, pick the latest-started)
-	var ongoingEvent *Event
+	var ongoingEvent *calendar.Event
 	for i := range todayEvents {
 		e := &todayEvents[i]
 		if e.IsAllDay() {
@@ -47,10 +47,10 @@ func (r *Result) Print() error {
 
 	if ongoingEvent != nil {
 		remaining := ongoingEvent.End.Sub(now)
-		output.Text = fmt.Sprintf("󰺏 %s (ends in %s)", html.EscapeString(ongoingEvent.Title), formatDuration(remaining))
+		payload.Text = fmt.Sprintf("󰺏 %s (ends in %s)", html.EscapeString(ongoingEvent.Title), formatDuration(remaining))
 	} else {
 		// Find next upcoming event for today (skip all-day events)
-		var nextEvent *Event
+		var nextEvent *calendar.Event
 		for i := range todayEvents {
 			e := &todayEvents[i]
 			if e.IsAllDay() {
@@ -64,9 +64,9 @@ func (r *Result) Print() error {
 
 		if nextEvent != nil {
 			until := nextEvent.Start.Sub(now)
-			output.Text = fmt.Sprintf("󰃰 %s (starts in %s)", html.EscapeString(nextEvent.Title), formatDuration(until))
+			payload.Text = fmt.Sprintf("󰃰 %s (starts in %s)", html.EscapeString(nextEvent.Title), formatDuration(until))
 		} else {
-			output.Text = " No more events today!"
+			payload.Text = " No more events today!"
 		}
 	}
 
@@ -92,14 +92,9 @@ func (r *Result) Print() error {
 			tooltipEntries = append(tooltipEntries, "")
 		}
 	}
-	output.Tooltip = strings.Join(tooltipEntries, "\n")
+	payload.Tooltip = strings.Join(tooltipEntries, "\n")
 
-	jsonBytes, err := json.Marshal(output)
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(jsonBytes))
-	return nil
+	return json.Marshal(payload)
 }
 
 // formatDuration formats a duration as a human-readable string like "1h 25m" or "45m".
@@ -122,17 +117,13 @@ func formatDuration(d time.Duration) string {
 	return "0m"
 }
 
-// groupEventsByDay sorts events by start time and groups them by calendar day.
+// groupEventsByDay groups pre-sorted events by calendar day.
 // Day labels: "Today", "Tomorrow", then weekday name (e.g. "Monday").
-func groupEventsByDay(events []Event, now time.Time) []EventsGroup {
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].Start.Before(events[j].Start)
-	})
-
+func groupEventsByDay(events []calendar.Event, now time.Time) []calendar.EventsGroup {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrow := today.AddDate(0, 0, 1)
 
-	grouped := make(map[string]*EventsGroup)
+	grouped := make(map[string]*calendar.EventsGroup)
 	var dayOrder []string
 
 	for _, e := range events {
@@ -149,14 +140,14 @@ func groupEventsByDay(events []Event, now time.Time) []EventsGroup {
 		}
 
 		if _, exists := grouped[label]; !exists {
-			grouped[label] = &EventsGroup{Day: label}
+			grouped[label] = &calendar.EventsGroup{Day: label}
 			dayOrder = append(dayOrder, label)
 		}
 		g := grouped[label]
 		g.Events = append(g.Events, e)
 	}
 
-	var result []EventsGroup
+	var result []calendar.EventsGroup
 	for _, label := range dayOrder {
 		result = append(result, *grouped[label])
 	}
