@@ -2,14 +2,13 @@ package commands
 
 import (
 	"github.com/hossainemruz/waybar-next-events/internal/app"
-	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
 // AppDeps holds the shared dependencies needed by commands.
 type AppDeps struct {
-	Registry       *calendar.Registry
+	Registry       *app.Registry
 	SecretStore    secrets.Store
 	AccountManager *app.AccountManager
 	EventFetcher   *app.EventFetcher

@@ -594,8 +594,8 @@ func cloneMap(values map[string]string) map[string]string {
 	return cloned
 }
 
-func newTestAccountManager(loader ConfigLoader, secretStore secrets.Store, tokenStore tokenstore.TokenStore, service calendar.Service) *AccountManager {
-	registry := calendar.NewRegistry()
+func newTestAccountManager(loader ConfigLoader, secretStore secrets.Store, tokenStore tokenstore.TokenStore, service Service) *AccountManager {
+	registry := NewRegistry()
 	if err := registry.Register(service); err != nil {
 		panic(err)
 	}

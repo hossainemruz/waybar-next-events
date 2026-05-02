@@ -1,26 +1,28 @@
-package calendar
+package app
 
 import (
 	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 )
 
 var (
-	ErrDuplicateService     = errors.New("calendar service already registered")
-	ErrServiceNotRegistered = errors.New("calendar service not registered")
-	ErrNilService           = errors.New("calendar service cannot be nil")
-	ErrEmptyServiceType     = errors.New("calendar service type cannot be empty")
+	ErrDuplicateService     = errors.New("service already registered")
+	ErrServiceNotRegistered = errors.New("service not registered")
+	ErrNilService           = errors.New("service cannot be nil")
+	ErrEmptyServiceType     = errors.New("service type cannot be empty")
 )
 
 // Registry stores services by their stable type identifier.
 type Registry struct {
-	services map[ServiceType]Service
+	services map[calendar.ServiceType]Service
 }
 
 // NewRegistry creates an empty service registry.
 func NewRegistry() *Registry {
-	return &Registry{services: make(map[ServiceType]Service)}
+	return &Registry{services: make(map[calendar.ServiceType]Service)}
 }
 
 // Register adds a service to the registry.
@@ -43,7 +45,7 @@ func (r *Registry) Register(service Service) error {
 }
 
 // Service resolves a service by type.
-func (r *Registry) Service(serviceType ServiceType) (Service, error) {
+func (r *Registry) Service(serviceType calendar.ServiceType) (Service, error) {
 	service, ok := r.services[serviceType]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrServiceNotRegistered, serviceType)

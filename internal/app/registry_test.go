@@ -1,17 +1,21 @@
-package calendar
+package app
 
 import (
 	"context"
 	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 )
 
 type testService struct {
-	serviceType ServiceType
+	serviceType calendar.ServiceType
 }
 
-func (s testService) Type() ServiceType {
+func (s testService) Type() calendar.ServiceType {
 	return s.serviceType
 }
 
@@ -19,27 +23,31 @@ func (s testService) DisplayName() string {
 	return string(s.serviceType)
 }
 
-func (s testService) AccountFields() []AccountField {
+func (s testService) AccountFields() []calendar.AccountField {
 	return nil
 }
 
-func (s testService) DiscoverCalendars(context.Context, Account, *http.Client) ([]Calendar, error) {
+func (s testService) DiscoverCalendars(context.Context, calendar.Account, *http.Client) ([]calendar.Calendar, error) {
 	return nil, nil
 }
 
-func (s testService) FetchEvents(context.Context, Account, EventQuery, *http.Client) ([]Event, error) {
+func (s testService) FetchEvents(context.Context, calendar.Account, calendar.EventQuery, *http.Client) ([]calendar.Event, error) {
+	return nil, nil
+}
+
+func (s testService) Provider(context.Context, calendar.Account, secrets.Store) (providers.Provider, error) {
 	return nil, nil
 }
 
 func TestRegistryRegisterAndResolve(t *testing.T) {
 	registry := NewRegistry()
-	service := testService{serviceType: ServiceTypeGoogle}
+	service := testService{serviceType: calendar.ServiceTypeGoogle}
 
 	if err := registry.Register(service); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	resolved, err := registry.Service(ServiceTypeGoogle)
+	resolved, err := registry.Service(calendar.ServiceTypeGoogle)
 	if err != nil {
 		t.Fatalf("Service() error = %v", err)
 	}
@@ -51,7 +59,7 @@ func TestRegistryRegisterAndResolve(t *testing.T) {
 
 func TestRegistryRegisterDuplicateService(t *testing.T) {
 	registry := NewRegistry()
-	service := testService{serviceType: ServiceTypeGoogle}
+	service := testService{serviceType: calendar.ServiceTypeGoogle}
 
 	if err := registry.Register(service); err != nil {
 		t.Fatalf("first Register() error = %v", err)
@@ -66,7 +74,7 @@ func TestRegistryRegisterDuplicateService(t *testing.T) {
 func TestRegistryServiceMissing(t *testing.T) {
 	registry := NewRegistry()
 
-	_, err := registry.Service(ServiceTypeGoogle)
+	_, err := registry.Service(calendar.ServiceTypeGoogle)
 	if !errors.Is(err, ErrServiceNotRegistered) {
 		t.Fatalf("Service() error = %v, want ErrServiceNotRegistered", err)
 	}
@@ -94,9 +102,9 @@ func TestRegistryRegisterEmptyServiceType(t *testing.T) {
 func TestRegistryAllReturnsSortedServices(t *testing.T) {
 	registry := NewRegistry()
 
-	googleService := testService{serviceType: ServiceTypeGoogle}
-	appleService := testService{serviceType: ServiceType("apple")}
-	outlookService := testService{serviceType: ServiceType("outlook")}
+	googleService := testService{serviceType: calendar.ServiceTypeGoogle}
+	appleService := testService{serviceType: calendar.ServiceType("apple")}
+	outlookService := testService{serviceType: calendar.ServiceType("outlook")}
 
 	for _, service := range []testService{outlookService, googleService, appleService} {
 		if err := registry.Register(service); err != nil {
@@ -109,7 +117,7 @@ func TestRegistryAllReturnsSortedServices(t *testing.T) {
 		t.Fatalf("All() returned %d services, want 3", len(services))
 	}
 
-	want := []ServiceType{"apple", ServiceTypeGoogle, "outlook"}
+	want := []calendar.ServiceType{"apple", calendar.ServiceTypeGoogle, "outlook"}
 	for i, service := range services {
 		if service.Type() != want[i] {
 			t.Fatalf("All()[%d].Type() = %q, want %q", i, service.Type(), want[i])

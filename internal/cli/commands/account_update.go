@@ -26,7 +26,7 @@ type accountUpdateManager interface {
 }
 
 type accountUpdateDeps struct {
-	registry    *calendar.Registry
+	registry    *app.Registry
 	manager     accountUpdateManager
 	secretStore secrets.Store
 	prompter    accountUpdatePrompter
