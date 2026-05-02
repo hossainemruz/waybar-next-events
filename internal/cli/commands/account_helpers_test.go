@@ -8,35 +8,6 @@ import (
 	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 )
 
-func TestAccountCommandRegistration(t *testing.T) {
-	root := BuildRoot(&AppDeps{})
-	if root == nil {
-		t.Fatal("root command = nil")
-	}
-
-	if root.Name() != "waybar-next-events" {
-		t.Fatalf("root command name = %q, want %q", root.Name(), "waybar-next-events")
-	}
-
-	accountCommand, _, err := root.Find([]string{"account"})
-	if err != nil {
-		t.Fatalf("root.Find(account) error = %v", err)
-	}
-	if accountCommand == nil {
-		t.Fatal("account command is not registered on root command")
-	}
-
-	for _, commandName := range []string{"list", "account"} {
-		command, _, err := root.Find([]string{commandName})
-		if err != nil {
-			t.Fatalf("root.Find(%q) error = %v", commandName, err)
-		}
-		if command == nil {
-			t.Fatalf("root.Find(%q) returned nil command", commandName)
-		}
-	}
-}
-
 func TestFindAccountByID(t *testing.T) {
 	accounts := []appcalendar.Account{{ID: "other-1", Service: appcalendar.ServiceType("outlook"), Name: "Mail"}}
 

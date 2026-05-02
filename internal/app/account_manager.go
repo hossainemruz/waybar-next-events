@@ -50,7 +50,7 @@ func NewAccountManager(loader ConfigLoader, services ServiceResolver, secretStor
 	}
 }
 
-// AddAccount creates, authenticates, and persists a new account.
+// AddAccountInput creates, authenticates, and persists a new account.
 type AddAccountInput struct {
 	Service          calendar.ServiceType
 	Name             string
@@ -114,7 +114,7 @@ func (m *AccountManager) AddAccount(ctx context.Context, input AddAccountInput) 
 	return account, nil
 }
 
-// UpdateAccount updates, re-authenticates if needed, and persists an account.
+// UpdateAccountInput updates, re-authenticates if needed, and persists an account.
 type UpdateAccountInput struct {
 	AccountID        string
 	Name             string
@@ -196,7 +196,7 @@ func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountI
 	return updated, nil
 }
 
-// DeleteAccount removes an account, its secrets, and its token.
+// DeleteAccountInput removes an account, its secrets, and its token.
 type DeleteAccountInput struct {
 	AccountID string
 }
@@ -259,7 +259,7 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, input DeleteAccountI
 	return *account, nil
 }
 
-// LoginAccount performs a forced re-authentication and only commits the new token on success.
+// LoginAccountInput performs a forced re-authentication and only commits the new token on success.
 type LoginAccountInput struct {
 	AccountID string
 }
