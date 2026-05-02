@@ -24,6 +24,18 @@ type AccountManager struct {
 	newAuthenticator func(store tokenstore.TokenStore) Authenticator
 }
 
+// ListAccounts returns all configured accounts.
+func (m *AccountManager) ListAccounts() ([]calendar.Account, error) {
+	cfg, err := m.loader.LoadOrEmpty()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil {
+		return []calendar.Account{}, nil
+	}
+	return cfg.Accounts, nil
+}
+
 // NewAccountManager creates an AccountManager.
 func NewAccountManager(loader ConfigLoader, services ServiceResolver, secretStore secrets.Store, tokenStore tokenstore.TokenStore) *AccountManager {
 	return &AccountManager{

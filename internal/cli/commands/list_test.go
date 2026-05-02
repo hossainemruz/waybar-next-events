@@ -1,7 +1,8 @@
-package cmd
+package commands
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/output"
-	"github.com/spf13/cobra"
 )
 
 func TestRunListSuccess(t *testing.T) {
@@ -22,10 +22,12 @@ func TestRunListSuccess(t *testing.T) {
 	cmd := newTestCommand()
 	cmd.SetOut(&buf)
 
-	deps := listDependencies{
+	deps := listDeps{
 		now: func() time.Time { return now },
-		fetchEvents: func(cmd *cobra.Command, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
-			return events, nil
+		fetcher: &fakeEventFetcher{
+			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
+				return events, nil
+			},
 		},
 	}
 
@@ -50,10 +52,12 @@ func TestRunListEmpty(t *testing.T) {
 	cmd := newTestCommand()
 	cmd.SetOut(&buf)
 
-	deps := listDependencies{
+	deps := listDeps{
 		now: func() time.Time { return now },
-		fetchEvents: func(cmd *cobra.Command, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
-			return []calendar.Event{}, nil
+		fetcher: &fakeEventFetcher{
+			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
+				return []calendar.Event{}, nil
+			},
 		},
 	}
 
@@ -76,10 +80,12 @@ func TestRunListFetchError(t *testing.T) {
 	wantErr := errors.New("fetch failed")
 
 	cmd := newTestCommand()
-	deps := listDependencies{
+	deps := listDeps{
 		now: func() time.Time { return now },
-		fetchEvents: func(cmd *cobra.Command, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
-			return nil, wantErr
+		fetcher: &fakeEventFetcher{
+			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
+				return nil, wantErr
+			},
 		},
 	}
 
@@ -96,10 +102,12 @@ func TestRunListRenderError(t *testing.T) {
 	cmd := newTestCommand()
 	cmd.SetOut(&buf)
 
-	deps := listDependencies{
+	deps := listDeps{
 		now: func() time.Time { return now },
-		fetchEvents: func(cmd *cobra.Command, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
-			return []calendar.Event{}, nil
+		fetcher: &fakeEventFetcher{
+			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
+				return []calendar.Event{}, nil
+			},
 		},
 	}
 
@@ -111,4 +119,15 @@ func TestRunListRenderError(t *testing.T) {
 	if out == "" {
 		t.Fatal("expected output for empty events, got none")
 	}
+}
+
+type fakeEventFetcher struct {
+	fetchFunc func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error)
+}
+
+func (f *fakeEventFetcher) Fetch(ctx context.Context, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
+	if f.fetchFunc != nil {
+		return f.fetchFunc(ctx, query, limit)
+	}
+	return nil, nil
 }
