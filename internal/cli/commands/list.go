@@ -3,41 +3,59 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/output"
 	"github.com/spf13/cobra"
 )
 
-var listLimit int
+const (
+	defaultLookAheadDays   = 4
+	defaultEventCountLimit = 10
+)
 
 type listEventFetcher interface {
 	Fetch(ctx context.Context, query calendar.EventQuery, limit int) ([]calendar.Event, error)
 }
 
+type listOptions struct {
+	days  int
+	limit int
+}
+
 type listDeps struct {
+	listOptions
 	now     func() time.Time
 	fetcher listEventFetcher
 	render  func([]calendar.Event, time.Time) ([]byte, error)
 }
 
 func buildListCmd(deps *AppDeps) *cobra.Command {
+	opts := listOptions{
+		days:  defaultLookAheadDays,
+		limit: defaultEventCountLimit,
+	}
+
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "Print upcoming calendar events",
-		Long:  "Retrieve and display upcoming calendar events. Use --limit to control how many events are shown.",
+		Long:  "Retrieve and display upcoming calendar events. Use --limit to control how many events are shown and --days to set the look-ahead window.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runList(cmd, listDeps{
-				now:     time.Now,
-				fetcher: deps.EventFetcher,
-				render:  output.Render,
+				listOptions: opts,
+				now:         time.Now,
+				fetcher:     deps.EventFetcher,
+				render:      output.Render,
 			})
 		},
 	}
 
-	cmd.Flags().IntVar(&listLimit, "limit", 5, "Maximum number of calendar events to show")
+	cmd.Flags().IntVar(&opts.days, "days", defaultLookAheadDays, "Number of days to look ahead")
+	cmd.Flags().IntVar(&opts.limit, "limit", defaultEventCountLimit, "Maximum number of calendar events to show")
 	return cmd
 }
 
@@ -49,8 +67,11 @@ func runList(cmd *cobra.Command, deps listDeps) error {
 	}
 
 	now := deps.now()
-	events, err := deps.fetcher.Fetch(ctx, calendar.EventQuery{Now: now, DayLimit: 4}, listLimit)
+	events, err := deps.fetcher.Fetch(ctx, calendar.EventQuery{Now: now, DayLimit: deps.days}, deps.limit)
 	if err != nil {
+		if errors.Is(err, appconfig.ErrNoAccounts) {
+			return fmt.Errorf("%w: %s", appconfig.ErrNoAccounts, noAccountsConfiguredHint)
+		}
 		return err
 	}
 
