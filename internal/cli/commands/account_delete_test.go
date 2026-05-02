@@ -19,7 +19,7 @@ func TestRunAccountDeleteDelegatesToAppService(t *testing.T) {
 	called := false
 	err := runAccountDelete(cmd, accountDeleteDeps{
 		manager: &fakeAccountDeleteManager{
-			listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
 			deleteAccountFunc: func(context.Context, app.DeleteAccountInput) (calendar.Account, error) {
 				called = true
 				return calendar.Account{Name: "Work"}, nil
@@ -41,7 +41,7 @@ func TestRunAccountDeleteDelegatesToAppService(t *testing.T) {
 func TestRunAccountDeleteReturnsNilOnAbort(t *testing.T) {
 	err := runAccountDelete(newTestCommand(), accountDeleteDeps{
 		manager: &fakeAccountDeleteManager{
-			listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
 		},
 		prompter: &stubAccountDeletePrompter{selectionErr: huh.ErrUserAborted},
 	})
@@ -74,16 +74,8 @@ func (s *stubAccountDeletePrompter) ConfirmDelete(_ context.Context, accountName
 }
 
 type fakeAccountDeleteManager struct {
-	listAccounts      []calendar.Account
-	listErr           error
+	fakeBaseManager
 	deleteAccountFunc func(context.Context, app.DeleteAccountInput) (calendar.Account, error)
-}
-
-func (f *fakeAccountDeleteManager) ListAccounts() ([]calendar.Account, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.listAccounts, nil
 }
 
 func (f *fakeAccountDeleteManager) DeleteAccount(ctx context.Context, input app.DeleteAccountInput) (calendar.Account, error) {

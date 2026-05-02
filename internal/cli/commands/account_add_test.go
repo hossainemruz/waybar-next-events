@@ -29,7 +29,7 @@ func TestRunAccountAddDelegatesToAppService(t *testing.T) {
 	err := runAccountAdd(cmd, accountAddDeps{
 		registry: registry,
 		manager: &fakeAccountAddManager{
-			listAccounts: []calendar.Account{},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{}},
 			addAccountFunc: func(ctx context.Context, input app.AddAccountInput) (calendar.Account, error) {
 				called = true
 				if input.Name != "Work" || input.Settings["client_id"] != "client-id" || input.Secrets["client_secret"] != "client-secret" {
@@ -63,7 +63,7 @@ func TestRunAccountAddReturnsNilOnUserAbort(t *testing.T) {
 	err := runAccountAdd(newTestCommand(), accountAddDeps{
 		registry: registry,
 		manager: &fakeAccountAddManager{
-			listAccounts: []calendar.Account{},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{}},
 		},
 		prompter: &stubAccountAddPrompter{selectServiceErr: huh.ErrUserAborted},
 	})
@@ -133,16 +133,8 @@ func (s *stubAccountAddPrompter) ConfirmEmptyCalendars(context.Context, string) 
 }
 
 type fakeAccountAddManager struct {
-	listAccounts   []calendar.Account
-	listErr        error
+	fakeBaseManager
 	addAccountFunc func(context.Context, app.AddAccountInput) (calendar.Account, error)
-}
-
-func (f *fakeAccountAddManager) ListAccounts() ([]calendar.Account, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.listAccounts, nil
 }
 
 func (f *fakeAccountAddManager) AddAccount(ctx context.Context, input app.AddAccountInput) (calendar.Account, error) {

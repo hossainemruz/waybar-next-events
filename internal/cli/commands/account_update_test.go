@@ -34,9 +34,9 @@ func TestRunAccountUpdateDelegatesToAppService(t *testing.T) {
 		registry:    registry,
 		secretStore: secretStore,
 		manager: &fakeAccountUpdateManager{
-			listAccounts: []calendar.Account{
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{
 				{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}, Calendars: []calendar.CalendarRef{{ID: "old", Name: "Old"}}},
-			},
+			}},
 			updateAccountFunc: func(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error) {
 				called = true
 				if input.AccountID != "work-id" || input.Name != "Work Updated" || input.Settings["client_id"] != "new-client" || input.Secrets["client_secret"] != "new-secret" {
@@ -84,13 +84,13 @@ func TestRunAccountUpdatePreservesUnknownSettings(t *testing.T) {
 		registry:    registry,
 		secretStore: secretStore,
 		manager: &fakeAccountUpdateManager{
-			listAccounts: []calendar.Account{{
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{
 				ID:        "work-id",
 				Service:   calendar.ServiceTypeGoogle,
 				Name:      "Work",
 				Settings:  map[string]string{"client_id": "old-client", "region": "us-east"},
 				Calendars: []calendar.CalendarRef{{ID: "old", Name: "Old"}},
-			}},
+			}}},
 			updateAccountFunc: func(_ context.Context, input app.UpdateAccountInput) (calendar.Account, error) {
 				receivedSettings = input.Settings
 				return calendar.Account{Name: "Work"}, nil
@@ -117,7 +117,7 @@ func TestRunAccountUpdateReturnsNilOnSelectionAbort(t *testing.T) {
 	err := runAccountUpdate(newTestCommand(), accountUpdateDeps{
 		registry: registry,
 		manager: &fakeAccountUpdateManager{
-			listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
 		},
 		prompter: &stubAccountUpdatePrompter{selectionErr: huh.ErrUserAborted},
 	})
@@ -198,16 +198,8 @@ func (s *stubAccountUpdatePrompter) ConfirmEmptyCalendars(context.Context, strin
 }
 
 type fakeAccountUpdateManager struct {
-	listAccounts      []calendar.Account
-	listErr           error
+	fakeBaseManager
 	updateAccountFunc func(context.Context, app.UpdateAccountInput) (calendar.Account, error)
-}
-
-func (f *fakeAccountUpdateManager) ListAccounts() ([]calendar.Account, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.listAccounts, nil
 }
 
 func (f *fakeAccountUpdateManager) UpdateAccount(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error) {

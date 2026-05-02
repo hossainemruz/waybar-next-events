@@ -1,2 +1,2 @@
-// Package commands is the planned home for Cobra command implementations.
+// Package commands contains Cobra command implementations.
 package commands

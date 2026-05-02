@@ -19,7 +19,7 @@ func TestRunAccountLoginDelegatesToAppService(t *testing.T) {
 	called := false
 	err := runAccountLogin(cmd, accountLoginDeps{
 		manager: &fakeAccountLoginManager{
-			listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
 			loginAccountFunc: func(_ context.Context, input app.LoginAccountInput) (calendar.Account, error) {
 				called = true
 				if input.AccountID != "work-id" {
@@ -44,7 +44,7 @@ func TestRunAccountLoginDelegatesToAppService(t *testing.T) {
 func TestRunAccountLoginReturnsNilOnAbort(t *testing.T) {
 	err := runAccountLogin(newTestCommand(), accountLoginDeps{
 		manager: &fakeAccountLoginManager{
-			listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}},
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
 		},
 		prompter: &stubAccountLoginPrompter{selectionErr: huh.ErrUserAborted},
 	})
@@ -66,16 +66,8 @@ func (s *stubAccountLoginPrompter) SelectAccount(context.Context, []calendar.Acc
 }
 
 type fakeAccountLoginManager struct {
-	listAccounts     []calendar.Account
-	listErr          error
+	fakeBaseManager
 	loginAccountFunc func(context.Context, app.LoginAccountInput) (calendar.Account, error)
-}
-
-func (f *fakeAccountLoginManager) ListAccounts() ([]calendar.Account, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.listAccounts, nil
 }
 
 func (f *fakeAccountLoginManager) LoginAccount(ctx context.Context, input app.LoginAccountInput) (calendar.Account, error) {

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -22,7 +23,7 @@ type listDeps struct {
 	render  func([]calendar.Event, time.Time) ([]byte, error)
 }
 
-func buildListCmd(fetcher listEventFetcher) *cobra.Command {
+func buildListCmd(deps *AppDeps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "Print upcoming calendar events",
@@ -30,7 +31,7 @@ func buildListCmd(fetcher listEventFetcher) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runList(cmd, listDeps{
 				now:     time.Now,
-				fetcher: fetcher,
+				fetcher: deps.EventFetcher,
 				render:  output.Render,
 			})
 		},
@@ -55,7 +56,14 @@ func runList(cmd *cobra.Command, deps listDeps) error {
 
 	payload, err := deps.render(events, now)
 	if err != nil {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "{\"text\": \" Something went wrong!\", \"tooltip\": \"%s\"}\n", err)
+		fallback, _ := json.Marshal(struct {
+			Text    string `json:"text"`
+			Tooltip string `json:"tooltip"`
+		}{
+			Text:    " Something went wrong!",
+			Tooltip: err.Error(),
+		})
+		_, _ = fmt.Fprintln(cmd.OutOrStdout(), string(fallback))
 		return nil
 	}
 

@@ -23,7 +23,7 @@ func BuildRoot(deps *AppDeps) *cobra.Command {
 		Long:  "A CLI tool that displays upcoming calendar events, designed to integrate with Waybar.",
 	}
 
-	root.AddCommand(buildListCmd(deps.EventFetcher))
+	root.AddCommand(buildListCmd(deps))
 	root.AddCommand(buildAccountCmd(deps))
 
 	return root

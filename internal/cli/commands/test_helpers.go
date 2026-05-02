@@ -23,6 +23,18 @@ func newTestRegistry() *calendar.Registry {
 	return registry
 }
 
+type fakeBaseManager struct {
+	listAccounts []calendar.Account
+	listErr      error
+}
+
+func (f *fakeBaseManager) ListAccounts() ([]calendar.Account, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.listAccounts, nil
+}
+
 type stubService struct{}
 
 func (s *stubService) Type() calendar.ServiceType { return calendar.ServiceTypeGoogle }
