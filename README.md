@@ -28,7 +28,7 @@ mise run test
 
 ## Run all checks
 
-This will run `build`, `format`, `lint`, and `test` in parallel.
+This will run `build`, `format`, `lint`, `test`, and `tidy` in parallel.
 
 ```bash
 mise run ci

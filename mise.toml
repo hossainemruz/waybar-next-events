@@ -24,7 +24,7 @@ description = "Run go mod tidy"
 run = "go mod tidy"
 
 [tasks.ci]
-description = "Run all CI checks (format, lint, test)"
+description = "Run all CI checks (build, format, lint, test, tidy)"
 depends = ["build", "format", "lint", "test", "tidy"]
 
 [tasks.dev]
