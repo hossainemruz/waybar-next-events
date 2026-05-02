@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 )
@@ -64,19 +63,14 @@ func TestService_Provider(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		gp, ok := provider.(*providers.Google)
-		if !ok {
-			t.Fatalf("expected *providers.Google, got %T", provider)
+		if provider.ClientID() != "my-client-id" {
+			t.Errorf("client ID mismatch: got %q, want %q", provider.ClientID(), "my-client-id")
 		}
-
-		if gp.ClientID() != "my-client-id" {
-			t.Errorf("client ID mismatch: got %q, want %q", gp.ClientID(), "my-client-id")
+		if provider.ClientSecret() != "my-secret" {
+			t.Errorf("client secret mismatch: got %q, want %q", provider.ClientSecret(), "my-secret")
 		}
-		if gp.ClientSecret() != "my-secret" {
-			t.Errorf("client secret mismatch: got %q, want %q", gp.ClientSecret(), "my-secret")
-		}
-		if gp.Name() != "google/acc-1" {
-			t.Errorf("name mismatch: got %q, want %q", gp.Name(), "google/acc-1")
+		if provider.Name() != "google/acc-1" {
+			t.Errorf("name mismatch: got %q, want %q", provider.Name(), "google/acc-1")
 		}
 	})
 }
