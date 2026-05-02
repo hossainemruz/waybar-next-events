@@ -15,13 +15,13 @@ import (
 // EventFetcher fetches events across accounts.
 type EventFetcher struct {
 	loader           ConfigLoader
-	services         ServiceResolver
+	services         *Registry
 	secretStore      secrets.Store
 	newAuthenticator func() Authenticator
 }
 
 // NewEventFetcher creates an EventFetcher.
-func NewEventFetcher(loader ConfigLoader, services ServiceResolver, secretStore secrets.Store, tokenStore tokenstore.TokenStore) *EventFetcher {
+func NewEventFetcher(loader ConfigLoader, services *Registry, secretStore secrets.Store, tokenStore tokenstore.TokenStore) *EventFetcher {
 	return &EventFetcher{
 		loader:      loader,
 		services:    services,
@@ -46,13 +46,9 @@ func (f *EventFetcher) Fetch(ctx context.Context, query calendar.EventQuery, lim
 	events := make([]calendar.Event, 0)
 
 	for _, account := range cfg.Accounts {
-		resolved, err := f.services.Service(account.Service)
+		service, err := f.services.Service(account.Service)
 		if err != nil {
 			return nil, err
-		}
-		service, ok := resolved.(Service)
-		if !ok {
-			return nil, fmt.Errorf("service %q does not implement app service interface", account.Service)
 		}
 
 		provider, err := service.Provider(ctx, account, f.secretStore)

@@ -17,7 +17,7 @@ import (
 // AccountManager owns account workflows.
 type AccountManager struct {
 	loader           ConfigLoader
-	services         ServiceResolver
+	services         *Registry
 	secretStore      secrets.Store
 	tokenStore       tokenstore.TokenStore
 	newAccountID     func() (string, error)
@@ -37,7 +37,7 @@ func (m *AccountManager) ListAccounts() ([]calendar.Account, error) {
 }
 
 // NewAccountManager creates an AccountManager.
-func NewAccountManager(loader ConfigLoader, services ServiceResolver, secretStore secrets.Store, tokenStore tokenstore.TokenStore) *AccountManager {
+func NewAccountManager(loader ConfigLoader, services *Registry, secretStore secrets.Store, tokenStore tokenstore.TokenStore) *AccountManager {
 	return &AccountManager{
 		loader:       loader,
 		services:     services,
@@ -60,7 +60,7 @@ type AddAccountInput struct {
 }
 
 func (m *AccountManager) AddAccount(ctx context.Context, input AddAccountInput) (calendar.Account, error) {
-	service, err := m.resolveService(input.Service)
+	service, err := m.services.Service(input.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -134,7 +134,7 @@ func (m *AccountManager) UpdateAccount(ctx context.Context, input UpdateAccountI
 		return calendar.Account{}, err
 	}
 
-	service, err := m.resolveService(original.Service)
+	service, err := m.services.Service(original.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -212,7 +212,7 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, input DeleteAccountI
 		return calendar.Account{}, err
 	}
 
-	service, err := m.resolveService(account.Service)
+	service, err := m.services.Service(account.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -275,7 +275,7 @@ func (m *AccountManager) LoginAccount(ctx context.Context, input LoginAccountInp
 		return calendar.Account{}, err
 	}
 
-	service, err := m.resolveService(account.Service)
+	service, err := m.services.Service(account.Service)
 	if err != nil {
 		return calendar.Account{}, err
 	}
@@ -359,20 +359,6 @@ func (m *AccountManager) commitAccountState(ctx context.Context, configSnapshot 
 	}
 
 	return nil
-}
-
-func (m *AccountManager) resolveService(serviceType calendar.ServiceType) (Service, error) {
-	service, err := m.services.Service(serviceType)
-	if err != nil {
-		return nil, err
-	}
-
-	appService, ok := service.(Service)
-	if !ok {
-		return nil, fmt.Errorf("service %q does not implement app service interface", serviceType)
-	}
-
-	return appService, nil
 }
 
 func tokenKey(account calendar.Account) string {

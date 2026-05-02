@@ -23,7 +23,7 @@ type accountAddManager interface {
 }
 
 type accountAddDeps struct {
-	registry *calendar.Registry
+	registry *app.Registry
 	manager  accountAddManager
 	prompter accountAddPrompter
 }
@@ -52,7 +52,13 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDeps) error {
 		ctx = context.Background()
 	}
 
-	service, err := deps.prompter.SelectService(ctx, deps.registry.All())
+	appServices := deps.registry.All()
+	calendarServices := make([]calendar.Service, len(appServices))
+	for i, s := range appServices {
+		calendarServices[i] = s
+	}
+
+	service, err := deps.prompter.SelectService(ctx, calendarServices)
 	if err != nil {
 		if forms.IsUserAbort(err) {
 			return nil

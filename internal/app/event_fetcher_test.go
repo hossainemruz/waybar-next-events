@@ -25,7 +25,7 @@ func TestEventFetcherFetchSortsAndLimitsEvents(t *testing.T) {
 			{Title: "Sooner", Start: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)},
 		},
 	}
-	registry := calendar.NewRegistry()
+	registry := NewRegistry()
 	if err := registry.Register(service); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -48,7 +48,7 @@ func TestEventFetcherFetchSortsAndLimitsEvents(t *testing.T) {
 }
 
 func TestEventFetcherFetchReturnsNoAccountsError(t *testing.T) {
-	fetcher := NewEventFetcher(newMemoryConfigLoaderWithAccounts(nil), calendar.NewRegistry(), secrets.NewInMemoryStore(), tokenstore.NewInMemoryTokenStore())
+	fetcher := NewEventFetcher(newMemoryConfigLoaderWithAccounts(nil), NewRegistry(), secrets.NewInMemoryStore(), tokenstore.NewInMemoryTokenStore())
 
 	_, err := fetcher.Fetch(context.Background(), calendar.EventQuery{Now: time.Now(), DayLimit: 4}, 5)
 	if !errors.Is(err, config.ErrNoAccounts) {
@@ -59,7 +59,7 @@ func TestEventFetcherFetchReturnsNoAccountsError(t *testing.T) {
 func TestEventFetcherFetchReturnsEmptyEventsSlice(t *testing.T) {
 	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "A"}})
 	service := &stubAppService{serviceType: calendar.ServiceTypeGoogle, events: []calendar.Event{}}
-	registry := calendar.NewRegistry()
+	registry := NewRegistry()
 	if err := registry.Register(service); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestEventFetcherFetchAppliesLimitWhenMoreEventsExist(t *testing.T) {
 			{Title: "Three", Start: time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)},
 		},
 	}
-	registry := calendar.NewRegistry()
+	registry := NewRegistry()
 	if err := registry.Register(service); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}

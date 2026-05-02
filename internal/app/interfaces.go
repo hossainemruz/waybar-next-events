@@ -33,11 +33,6 @@ type Service interface {
 	Provider(ctx context.Context, account calendar.Account, secretStore secrets.Store) (providers.Provider, error)
 }
 
-// ServiceResolver resolves services by stable type.
-type ServiceResolver interface {
-	Service(serviceType calendar.ServiceType) (calendar.Service, error)
-}
-
 // CalendarSelector handles interactive calendar-selection decisions.
 type CalendarSelector interface {
 	SelectCalendars(ctx context.Context, account calendar.Account, discovered []calendar.Calendar) ([]calendar.CalendarRef, error)

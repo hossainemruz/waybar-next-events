@@ -6,7 +6,6 @@ import (
 
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/auth/tokenstore"
-	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/cli/commands"
 	"github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/secrets"
@@ -15,7 +14,7 @@ import (
 
 // App holds shared CLI dependencies.
 type App struct {
-	Registry       *calendar.Registry
+	Registry       *app.Registry
 	Loader         *config.Loader
 	SecretStore    secrets.Store
 	TokenStore     tokenstore.TokenStore
@@ -24,9 +23,9 @@ type App struct {
 }
 
 // New creates an App with the given registry.
-func New(registry *calendar.Registry) *App {
+func New(registry *app.Registry) *App {
 	if registry == nil {
-		registry = calendar.NewRegistry()
+		registry = app.NewRegistry()
 	}
 	loader := config.NewLoader()
 	secretStore := secrets.NewKeyringStore()
@@ -58,7 +57,7 @@ func (a *App) Run() error {
 }
 
 // Execute creates a new App and runs it.
-func Execute(registry *calendar.Registry) {
+func Execute(registry *app.Registry) {
 	if err := New(registry).Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -5,7 +5,10 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/hossainemruz/waybar-next-events/internal/app"
+	"github.com/hossainemruz/waybar-next-events/internal/auth/providers"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -17,8 +20,8 @@ func newTestCommand() *cobra.Command {
 	return cmd
 }
 
-func newTestRegistry() *calendar.Registry {
-	registry := calendar.NewRegistry()
+func newTestRegistry() *app.Registry {
+	registry := app.NewRegistry()
 	_ = registry.Register(&stubService{})
 	return registry
 }
@@ -49,5 +52,11 @@ func (s *stubService) DiscoverCalendars(context.Context, calendar.Account, *http
 	return nil, nil
 }
 func (s *stubService) FetchEvents(context.Context, calendar.Account, calendar.EventQuery, *http.Client) ([]calendar.Event, error) {
+	return nil, nil
+}
+
+// Provider is intentionally unimplemented for this test helper.
+// Command-level tests exercise wiring and prompts, not provider construction.
+func (s *stubService) Provider(context.Context, calendar.Account, secrets.Store) (providers.Provider, error) {
 	return nil, nil
 }

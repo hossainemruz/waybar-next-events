@@ -3,7 +3,7 @@ package cli
 import (
 	"testing"
 
-	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	"github.com/hossainemruz/waybar-next-events/internal/app"
 )
 
 func TestRootCommandInitialization(t *testing.T) {
@@ -28,15 +28,15 @@ func TestRootCommandInitialization(t *testing.T) {
 }
 
 func TestAppWithRegistry(t *testing.T) {
-	registry := calendar.NewRegistry()
-	app := New(registry)
-	if app.Registry != registry {
+	registry := app.NewRegistry()
+	cliApp := New(registry)
+	if cliApp.Registry != registry {
 		t.Fatal("expected App to use provided registry")
 	}
-	if app.AccountManager == nil {
+	if cliApp.AccountManager == nil {
 		t.Fatal("expected AccountManager to be initialized")
 	}
-	if app.EventFetcher == nil {
+	if cliApp.EventFetcher == nil {
 		t.Fatal("expected EventFetcher to be initialized")
 	}
 }
