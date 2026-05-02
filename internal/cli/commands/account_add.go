@@ -1,4 +1,4 @@
-package cmd
+package commands
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
 	"github.com/hossainemruz/waybar-next-events/internal/cli/forms"
-	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -18,59 +17,42 @@ type accountAddPrompter interface {
 	ConfirmEmptyCalendars(ctx context.Context, accountName string) error
 }
 
-type accountAddDependencies struct {
-	newLoader   func() *appconfig.Loader
-	newRegistry func() *calendar.Registry
-	newPrompter func(cmd *cobra.Command) accountAddPrompter
-	addAccount  func(ctx context.Context, input app.AddAccountInput) (calendar.Account, error)
+type accountAddManager interface {
+	ListAccounts() ([]calendar.Account, error)
+	AddAccount(ctx context.Context, input app.AddAccountInput) (calendar.Account, error)
 }
 
-var defaultAccountAddDependencies = accountAddDependencies{
-	newLoader: func() *appconfig.Loader {
-		return appconfig.NewLoader()
-	},
-	newRegistry: newAppRegistry,
-	newPrompter: func(cmd *cobra.Command) accountAddPrompter {
-		return &forms.Prompter{
-			Input:  cmd.InOrStdin(),
-			Output: cmd.ErrOrStderr(),
-		}
-	},
-	addAccount: func(ctx context.Context, input app.AddAccountInput) (calendar.Account, error) {
-		return newAccountManager().AddAccount(ctx, input)
-	},
+type accountAddDeps struct {
+	registry *calendar.Registry
+	manager  accountAddManager
+	prompter accountAddPrompter
 }
 
-// accountAddCmd adds a new calendar account via an interactive form.
-var accountAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a new calendar account",
-	Long:  "Interactively add a new calendar account by entering credentials, authenticating, and selecting calendars.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAccountAdd(cmd, defaultAccountAddDependencies)
-	},
+func buildAccountAddCmd(deps *AppDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "add",
+		Short: "Add a new calendar account",
+		Long:  "Interactively add a new calendar account by entering credentials, authenticating, and selecting calendars.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAccountAdd(cmd, accountAddDeps{
+				registry: deps.Registry,
+				manager:  deps.AccountManager,
+				prompter: &forms.Prompter{
+					Input:  cmd.InOrStdin(),
+					Output: cmd.ErrOrStderr(),
+				},
+			})
+		},
+	}
 }
 
-func init() {
-	accountCmd.AddCommand(accountAddCmd)
-}
-
-func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
+func runAccountAdd(cmd *cobra.Command, deps accountAddDeps) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	loader := deps.newLoader()
-	cfg, err := loadConfigOrEmpty(loader)
-	if err != nil {
-		return err
-	}
-
-	registry := deps.newRegistry()
-	prompter := deps.newPrompter(cmd)
-
-	service, err := prompter.SelectService(ctx, registry.All())
+	service, err := deps.prompter.SelectService(ctx, deps.registry.All())
 	if err != nil {
 		if forms.IsUserAbort(err) {
 			return nil
@@ -78,8 +60,13 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return err
 	}
 
-	input, err := prompter.PromptAccountFields(ctx, service.AccountFields(), forms.AccountFieldsData{}, func(name string) error {
-		return validateNewAccountName(cfg, name)
+	accounts, err := deps.manager.ListAccounts()
+	if err != nil {
+		return err
+	}
+
+	input, err := deps.prompter.PromptAccountFields(ctx, service.AccountFields(), forms.AccountFieldsData{}, func(name string) error {
+		return validateNewAccountName(accounts, name)
 	})
 	if err != nil {
 		if forms.IsUserAbort(err) {
@@ -88,14 +75,14 @@ func runAccountAdd(cmd *cobra.Command, deps accountAddDependencies) error {
 		return err
 	}
 
-	newAccount, err := deps.addAccount(ctx, app.AddAccountInput{
+	newAccount, err := deps.manager.AddAccount(ctx, app.AddAccountInput{
 		Service:  service.Type(),
 		Name:     input.Name,
 		Settings: input.Settings,
 		Secrets:  input.Secrets,
 		CalendarSelector: accountCalendarSelector{
 			accountName: input.Name,
-			prompter:    prompter,
+			prompter:    deps.prompter,
 		},
 	})
 	if err != nil {

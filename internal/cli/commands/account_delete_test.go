@@ -1,4 +1,4 @@
-package cmd
+package commands
 
 import (
 	"context"
@@ -8,25 +8,24 @@ import (
 	"charm.land/huh/v2"
 	"github.com/hossainemruz/waybar-next-events/internal/app"
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
-	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
-	"github.com/spf13/cobra"
 )
 
 func TestRunAccountDeleteDelegatesToAppService(t *testing.T) {
-	loader := appconfig.NewLoaderWithPath(writeGenericConfig(t, []appconfig.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}))
 	prompter := &stubAccountDeletePrompter{selectedAccountID: "work-id", confirmed: true}
 	stdout := &strings.Builder{}
 	cmd := newTestCommand()
 	cmd.SetOut(stdout)
 
 	called := false
-	err := runAccountDelete(cmd, accountDeleteDependencies{
-		newLoader:   func() *appconfig.Loader { return loader },
-		newPrompter: func(*cobra.Command) accountDeletePrompter { return prompter },
-		deleteAccount: func(context.Context, app.DeleteAccountInput) (calendar.Account, error) {
-			called = true
-			return calendar.Account{Name: "Work"}, nil
+	err := runAccountDelete(cmd, accountDeleteDeps{
+		manager: &fakeAccountDeleteManager{
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
+			deleteAccountFunc: func(context.Context, app.DeleteAccountInput) (calendar.Account, error) {
+				called = true
+				return calendar.Account{Name: "Work"}, nil
+			},
 		},
+		prompter: prompter,
 	})
 	if err != nil {
 		t.Fatalf("runAccountDelete() error = %v", err)
@@ -40,16 +39,11 @@ func TestRunAccountDeleteDelegatesToAppService(t *testing.T) {
 }
 
 func TestRunAccountDeleteReturnsNilOnAbort(t *testing.T) {
-	loader := appconfig.NewLoaderWithPath(writeGenericConfig(t, []appconfig.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}))
-	err := runAccountDelete(newTestCommand(), accountDeleteDependencies{
-		newLoader: func() *appconfig.Loader { return loader },
-		newPrompter: func(*cobra.Command) accountDeletePrompter {
-			return &stubAccountDeletePrompter{selectionErr: huh.ErrUserAborted}
+	err := runAccountDelete(newTestCommand(), accountDeleteDeps{
+		manager: &fakeAccountDeleteManager{
+			fakeBaseManager: fakeBaseManager{listAccounts: []calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}},
 		},
-		deleteAccount: func(context.Context, app.DeleteAccountInput) (calendar.Account, error) {
-			t.Fatal("deleteAccount should not be called")
-			return calendar.Account{}, nil
-		},
+		prompter: &stubAccountDeletePrompter{selectionErr: huh.ErrUserAborted},
 	})
 	if err != nil {
 		t.Fatalf("runAccountDelete() error = %v, want nil", err)
@@ -77,4 +71,16 @@ func (s *stubAccountDeletePrompter) ConfirmDelete(_ context.Context, accountName
 		return false, s.confirmErr
 	}
 	return s.confirmed, nil
+}
+
+type fakeAccountDeleteManager struct {
+	fakeBaseManager
+	deleteAccountFunc func(context.Context, app.DeleteAccountInput) (calendar.Account, error)
+}
+
+func (f *fakeAccountDeleteManager) DeleteAccount(ctx context.Context, input app.DeleteAccountInput) (calendar.Account, error) {
+	if f.deleteAccountFunc != nil {
+		return f.deleteAccountFunc(ctx, input)
+	}
+	return calendar.Account{}, nil
 }

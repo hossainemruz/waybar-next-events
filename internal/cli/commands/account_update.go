@@ -1,4 +1,4 @@
-package cmd
+package commands
 
 import (
 	"context"
@@ -20,65 +20,53 @@ type accountUpdatePrompter interface {
 	ConfirmEmptyCalendars(ctx context.Context, accountName string) error
 }
 
-type accountUpdateDependencies struct {
-	newLoader      func() *appconfig.Loader
-	newRegistry    func() *calendar.Registry
-	newPrompter    func(cmd *cobra.Command) accountUpdatePrompter
-	newSecretStore func() secrets.Store
-	updateAccount  func(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error)
+type accountUpdateManager interface {
+	ListAccounts() ([]calendar.Account, error)
+	UpdateAccount(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error)
 }
 
-var defaultAccountUpdateDependencies = accountUpdateDependencies{
-	newLoader: func() *appconfig.Loader {
-		return appconfig.NewLoader()
-	},
-	newRegistry: newAppRegistry,
-	newPrompter: func(cmd *cobra.Command) accountUpdatePrompter {
-		return &forms.Prompter{
-			Input:  cmd.InOrStdin(),
-			Output: cmd.ErrOrStderr(),
-		}
-	},
-	newSecretStore: func() secrets.Store { return secrets.NewKeyringStore() },
-	updateAccount: func(ctx context.Context, input app.UpdateAccountInput) (calendar.Account, error) {
-		return newAccountManager().UpdateAccount(ctx, input)
-	},
+type accountUpdateDeps struct {
+	registry    *calendar.Registry
+	manager     accountUpdateManager
+	secretStore secrets.Store
+	prompter    accountUpdatePrompter
 }
 
-// accountUpdateCmd updates an existing calendar account via an interactive form.
-var accountUpdateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update an existing calendar account",
-	Long:  "Interactively update an existing calendar account by selecting an account, editing credentials, re-authenticating, and adjusting calendar selections.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAccountUpdate(cmd, defaultAccountUpdateDependencies)
-	},
+func buildAccountUpdateCmd(deps *AppDeps) *cobra.Command {
+	return &cobra.Command{
+		Use:   "update",
+		Short: "Update an existing calendar account",
+		Long:  "Interactively update an existing calendar account by selecting an account, editing credentials, re-authenticating, and adjusting calendar selections.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runAccountUpdate(cmd, accountUpdateDeps{
+				registry:    deps.Registry,
+				manager:     deps.AccountManager,
+				secretStore: deps.SecretStore,
+				prompter: &forms.Prompter{
+					Input:  cmd.InOrStdin(),
+					Output: cmd.ErrOrStderr(),
+				},
+			})
+		},
+	}
 }
 
-func init() {
-	accountCmd.AddCommand(accountUpdateCmd)
-}
-
-func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error {
+func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDeps) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	loader := deps.newLoader()
-	cfg, err := loadConfigOrEmpty(loader)
+	accounts, err := deps.manager.ListAccounts()
 	if err != nil {
 		return err
 	}
 
-	if err := ensureHasAccounts(cfg); err != nil {
-		return err
+	if len(accounts) == 0 {
+		return fmt.Errorf("%w: %s", appconfig.ErrNoAccounts, noAccountsConfiguredHint)
 	}
 
-	registry := deps.newRegistry()
-	prompter := deps.newPrompter(cmd)
-
-	selectedAccountID, err := prompter.SelectAccount(ctx, cfg.Accounts, "Select an account to update")
+	selectedAccountID, err := deps.prompter.SelectAccount(ctx, accounts, "Select an account to update")
 	if err != nil {
 		if forms.IsUserAbort(err) {
 			return nil
@@ -86,24 +74,23 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		return err
 	}
 
-	originalAccount, err := findAccountByID(cfg, selectedAccountID)
+	originalAccount, err := findAccountByID(accounts, selectedAccountID)
 	if err != nil {
 		return err
 	}
 
-	service, err := registry.Service(originalAccount.Service)
+	service, err := deps.registry.Service(originalAccount.Service)
 	if err != nil {
 		return err
 	}
 
-	secretStore := deps.newSecretStore()
-	defaults, err := loadAccountFieldDefaults(ctx, service.AccountFields(), secretStore, originalAccount)
+	defaults, err := loadAccountFieldDefaults(ctx, service.AccountFields(), deps.secretStore, *originalAccount)
 	if err != nil {
 		return err
 	}
 
-	input, err := prompter.PromptAccountFields(ctx, service.AccountFields(), defaults, func(name string) error {
-		return validateUpdatedAccountName(cfg, originalAccount.Name, name)
+	input, err := deps.prompter.PromptAccountFields(ctx, service.AccountFields(), defaults, func(name string) error {
+		return validateUpdatedAccountName(accounts, originalAccount.Name, name)
 	})
 	if err != nil {
 		if forms.IsUserAbort(err) {
@@ -123,14 +110,14 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 		settings[k] = v
 	}
 
-	updatedAccount, err := deps.updateAccount(ctx, app.UpdateAccountInput{
+	updatedAccount, err := deps.manager.UpdateAccount(ctx, app.UpdateAccountInput{
 		AccountID: originalAccount.ID,
 		Name:      input.Name,
 		Settings:  settings,
 		Secrets:   input.Secrets,
 		CalendarSelector: updateCalendarSelector{
 			accountName:         input.Name,
-			prompter:            prompter,
+			prompter:            deps.prompter,
 			selectedCalendarIDs: originalAccount.CalendarIDs(),
 		},
 	})
@@ -145,7 +132,7 @@ func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDependencies) error 
 	return nil
 }
 
-func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountField, store secrets.Store, account *appconfig.Account) (forms.AccountFieldsData, error) {
+func loadAccountFieldDefaults(ctx context.Context, fields []calendar.AccountField, store secrets.Store, account calendar.Account) (forms.AccountFieldsData, error) {
 	// Seed all current settings so the form preserves unknown keys.
 	settings := make(map[string]string, len(account.Settings))
 	for k, v := range account.Settings {
