@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	appconfig "github.com/hossainemruz/waybar-next-events/internal/config"
 	"github.com/hossainemruz/waybar-next-events/internal/output"
 )
 
@@ -23,7 +25,8 @@ func TestRunListSuccess(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	deps := listDeps{
-		now: func() time.Time { return now },
+		listOptions: listOptions{days: defaultLookAheadDays, limit: defaultEventCountLimit},
+		now:         func() time.Time { return now },
 		fetcher: &fakeEventFetcher{
 			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
 				return events, nil
@@ -54,7 +57,8 @@ func TestRunListEmpty(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	deps := listDeps{
-		now: func() time.Time { return now },
+		listOptions: listOptions{days: defaultLookAheadDays, limit: defaultEventCountLimit},
+		now:         func() time.Time { return now },
 		fetcher: &fakeEventFetcher{
 			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
 				return []calendar.Event{}, nil
@@ -83,7 +87,8 @@ func TestRunListFetchError(t *testing.T) {
 
 	cmd := newTestCommand()
 	deps := listDeps{
-		now: func() time.Time { return now },
+		listOptions: listOptions{days: defaultLookAheadDays, limit: defaultEventCountLimit},
+		now:         func() time.Time { return now },
 		fetcher: &fakeEventFetcher{
 			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
 				return nil, wantErr
@@ -107,7 +112,8 @@ func TestRunListRenderError(t *testing.T) {
 	cmd.SetOut(&buf)
 
 	deps := listDeps{
-		now: func() time.Time { return now },
+		listOptions: listOptions{days: defaultLookAheadDays, limit: defaultEventCountLimit},
+		now:         func() time.Time { return now },
 		fetcher: &fakeEventFetcher{
 			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
 				return []calendar.Event{}, nil
@@ -128,6 +134,111 @@ func TestRunListRenderError(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("render failed")) {
 		t.Fatalf("expected error message in tooltip, got %q", out)
+	}
+}
+
+func TestRunListNoAccountsHint(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	cmd := newTestCommand()
+	deps := listDeps{
+		listOptions: listOptions{days: defaultLookAheadDays, limit: defaultEventCountLimit},
+		now:         func() time.Time { return now },
+		fetcher: &fakeEventFetcher{
+			fetchFunc: func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error) {
+				return nil, appconfig.ErrNoAccounts
+			},
+		},
+		render: output.Render,
+	}
+
+	err := runList(cmd, deps)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, appconfig.ErrNoAccounts) {
+		t.Fatalf("runList() error = %v, want ErrNoAccounts", err)
+	}
+	if !strings.Contains(err.Error(), noAccountsConfiguredHint) {
+		t.Fatalf("error message does not contain hint %q: %v", noAccountsConfiguredHint, err)
+	}
+}
+
+func TestRunListPassesDaysAndLimit(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	var gotQuery calendar.EventQuery
+	var gotLimit int
+
+	cmd := newTestCommand()
+	deps := listDeps{
+		listOptions: listOptions{days: 7, limit: 10},
+		now:         func() time.Time { return now },
+		fetcher: &fakeEventFetcher{
+			fetchFunc: func(_ context.Context, query calendar.EventQuery, limit int) ([]calendar.Event, error) {
+				gotQuery = query
+				gotLimit = limit
+				return []calendar.Event{}, nil
+			},
+		},
+		render: output.Render,
+	}
+
+	if err := runList(cmd, deps); err != nil {
+		t.Fatalf("runList() error = %v", err)
+	}
+
+	if gotQuery.DayLimit != 7 {
+		t.Fatalf("DayLimit = %d, want 7", gotQuery.DayLimit)
+	}
+	if gotLimit != 10 {
+		t.Fatalf("limit = %d, want 10", gotLimit)
+	}
+}
+
+func TestBuildListCmdFlagDefaults(t *testing.T) {
+	cmd := buildListCmd(&AppDeps{})
+
+	days, err := cmd.Flags().GetInt("days")
+	if err != nil {
+		t.Fatalf("GetInt(days) error = %v", err)
+	}
+	if days != defaultLookAheadDays {
+		t.Fatalf("days default = %d, want %d", days, defaultLookAheadDays)
+	}
+
+	limit, err := cmd.Flags().GetInt("limit")
+	if err != nil {
+		t.Fatalf("GetInt(limit) error = %v", err)
+	}
+	if limit != defaultEventCountLimit {
+		t.Fatalf("limit default = %d, want %d", limit, defaultEventCountLimit)
+	}
+}
+
+func TestBuildListCmdParsesCustomDays(t *testing.T) {
+	cmd := buildListCmd(&AppDeps{})
+	if err := cmd.ParseFlags([]string{"--days", "7"}); err != nil {
+		t.Fatalf("ParseFlags error = %v", err)
+	}
+	days, err := cmd.Flags().GetInt("days")
+	if err != nil {
+		t.Fatalf("GetInt(days) error = %v", err)
+	}
+	if days != 7 {
+		t.Fatalf("days = %d, want 7", days)
+	}
+}
+
+func TestBuildListCmdParsesCustomLimit(t *testing.T) {
+	cmd := buildListCmd(&AppDeps{})
+	if err := cmd.ParseFlags([]string{"--limit", "10"}); err != nil {
+		t.Fatalf("ParseFlags error = %v", err)
+	}
+	limit, err := cmd.Flags().GetInt("limit")
+	if err != nil {
+		t.Fatalf("GetInt(limit) error = %v", err)
+	}
+	if limit != 10 {
+		t.Fatalf("limit = %d, want 10", limit)
 	}
 }
 
