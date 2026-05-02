@@ -71,10 +71,9 @@ type CalendarRef struct {
 
 // Event represents a calendar event.
 type Event struct {
-	Title    string
-	Start    time.Time
-	End      time.Time
-	Calendar string
+	Title string
+	Start time.Time
+	End   time.Time
 }
 
 // IsAllDay reports whether the event spans exactly one local calendar day.

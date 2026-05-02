@@ -45,7 +45,12 @@ func (f *EventFetcher) Fetch(ctx context.Context, query calendar.EventQuery, lim
 	authenticator := f.newAuthenticator()
 	events := make([]calendar.Event, 0)
 
+	// Fetch is fail-fast: one errored account stops processing for all accounts.
 	for _, account := range cfg.Accounts {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		service, err := f.services.Service(account.Service)
 		if err != nil {
 			return nil, err
@@ -75,9 +80,6 @@ func (f *EventFetcher) Fetch(ctx context.Context, query calendar.EventQuery, lim
 
 	if limit > 0 && len(events) > limit {
 		events = events[:limit]
-	}
-	if events == nil {
-		return []calendar.Event{}, nil
 	}
 
 	return events, nil

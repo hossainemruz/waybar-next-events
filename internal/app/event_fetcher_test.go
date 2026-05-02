@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -72,6 +73,68 @@ func TestEventFetcherFetchReturnsEmptyEventsSlice(t *testing.T) {
 	}
 	if events == nil || len(events) != 0 {
 		t.Fatalf("events = %+v, want empty slice", events)
+	}
+}
+
+func TestEventFetcherFetchReturnsErrorOnAlreadyCancelledContext(t *testing.T) {
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{
+		{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "A"},
+	})
+	service := &stubAppService{serviceType: calendar.ServiceTypeGoogle, events: []calendar.Event{}}
+	registry := NewRegistry()
+	if err := registry.Register(service); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	fetcher := NewEventFetcher(loader, registry, secrets.NewInMemoryStore(), tokenstore.NewInMemoryTokenStore())
+	fetcher.newAuthenticator = func() Authenticator { return &stubAuthenticator{store: tokenstore.NewInMemoryTokenStore()} }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := fetcher.Fetch(ctx, calendar.EventQuery{Now: time.Now(), DayLimit: 4}, 5)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Fetch() error = %v, want context.Canceled", err)
+	}
+}
+
+// cancellingStubService wraps a stubAppService and cancels the context after the first FetchEvents call.
+type cancellingStubService struct {
+	*stubAppService
+	cancel context.CancelFunc
+	calls  int
+}
+
+func (s *cancellingStubService) FetchEvents(ctx context.Context, account calendar.Account, query calendar.EventQuery, client *http.Client) ([]calendar.Event, error) {
+	s.calls++
+	if s.calls == 1 {
+		s.cancel()
+	}
+	return s.stubAppService.FetchEvents(ctx, account, query, client)
+}
+
+func TestEventFetcherFetchReturnsErrorWhenCancelledBetweenAccounts(t *testing.T) {
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{
+		{ID: "a", Service: calendar.ServiceTypeGoogle, Name: "A"},
+		{ID: "b", Service: calendar.ServiceTypeGoogle, Name: "B"},
+	})
+	base := &stubAppService{
+		serviceType: calendar.ServiceTypeGoogle,
+		events: []calendar.Event{
+			{Title: "First", Start: time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	service := &cancellingStubService{stubAppService: base, cancel: cancel}
+	registry := NewRegistry()
+	if err := registry.Register(service); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	fetcher := NewEventFetcher(loader, registry, secrets.NewInMemoryStore(), tokenstore.NewInMemoryTokenStore())
+	fetcher.newAuthenticator = func() Authenticator { return &stubAuthenticator{store: tokenstore.NewInMemoryTokenStore()} }
+
+	_, err := fetcher.Fetch(ctx, calendar.EventQuery{Now: time.Now(), DayLimit: 4}, 5)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Fetch() error = %v, want context.Canceled", err)
 	}
 }
 
