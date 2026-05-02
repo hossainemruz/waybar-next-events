@@ -19,6 +19,7 @@ type listEventFetcher interface {
 type listDeps struct {
 	now     func() time.Time
 	fetcher listEventFetcher
+	render  func([]calendar.Event, time.Time) ([]byte, error)
 }
 
 func buildListCmd(fetcher listEventFetcher) *cobra.Command {
@@ -30,6 +31,7 @@ func buildListCmd(fetcher listEventFetcher) *cobra.Command {
 			return runList(cmd, listDeps{
 				now:     time.Now,
 				fetcher: fetcher,
+				render:  output.Render,
 			})
 		},
 	}
@@ -51,7 +53,7 @@ func runList(cmd *cobra.Command, deps listDeps) error {
 		return err
 	}
 
-	payload, err := output.Render(events, now)
+	payload, err := deps.render(events, now)
 	if err != nil {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "{\"text\": \" Something went wrong!\", \"tooltip\": \"%s\"}\n", err)
 		return nil
