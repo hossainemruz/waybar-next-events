@@ -23,7 +23,7 @@ func (s *Service) Type() calendar.ServiceType {
 }
 
 func (s *Service) DisplayName() string {
-	return "Google"
+	return "Google Calendar"
 }
 
 func (s *Service) AccountFields() []calendar.AccountField {
