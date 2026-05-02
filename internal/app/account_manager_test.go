@@ -3,7 +3,10 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,7 +19,7 @@ import (
 )
 
 func TestAccountManagerAddAccountPersistsConfigSecretsAndToken(t *testing.T) {
-	loader := newMemoryConfigLoader()
+	loader := newMemoryConfigLoader(t)
 	secretStore := secrets.NewInMemoryStore()
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{
@@ -63,7 +66,7 @@ func TestAccountManagerAddAccountPersistsConfigSecretsAndToken(t *testing.T) {
 }
 
 func TestAccountManagerAddAccountRollsBackOnTokenCommitFailure(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "existing", Service: calendar.ServiceTypeGoogle, Name: "Existing"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "existing", Service: calendar.ServiceTypeGoogle, Name: "Existing"}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	tokenStore := &failingTokenStore{setErr: errors.New("token store down")}
 	service := &stubAppService{
@@ -92,8 +95,8 @@ func TestAccountManagerAddAccountRollsBackOnTokenCommitFailure(t *testing.T) {
 }
 
 func TestAccountManagerAddAccountReturnsSaveErrorWithoutPersistingSecrets(t *testing.T) {
-	loader := newMemoryConfigLoader()
-	loader.saveErr = errors.New("save failed")
+	loader := newMemoryConfigLoader(t)
+	loader.saveError = errors.New("save failed")
 	secretStore := secrets.NewInMemoryStore()
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{
@@ -119,7 +122,7 @@ func TestAccountManagerAddAccountReturnsSaveErrorWithoutPersistingSecrets(t *tes
 }
 
 func TestAccountManagerAddAccountRollsBackOnSecretCommitFailure(t *testing.T) {
-	loader := newMemoryConfigLoader()
+	loader := newMemoryConfigLoader(t)
 	secretStore := &failingSecretStore{setErr: errors.New("secret store down"), values: map[string]string{}}
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{
@@ -145,7 +148,7 @@ func TestAccountManagerAddAccountRollsBackOnSecretCommitFailure(t *testing.T) {
 }
 
 func TestAccountManagerAddAccountReturnsWithoutMutatingStateOnUserAbort(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "existing", Service: calendar.ServiceTypeGoogle, Name: "Existing"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "existing", Service: calendar.ServiceTypeGoogle, Name: "Existing"}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{
@@ -177,7 +180,7 @@ func TestAccountManagerAddAccountReturnsWithoutMutatingStateOnUserAbort(t *testi
 }
 
 func TestAccountManagerUpdateAccountPreservesExistingTokenWhenCredentialsUnchanged(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "client-id"}, Calendars: []calendar.CalendarRef{{ID: "old", Name: "Old"}}}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "client-id"}, Calendars: []calendar.CalendarRef{{ID: "old", Name: "Old"}}}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "secret-value")
 	tokenStore := tokenstore.NewInMemoryTokenStore()
@@ -209,8 +212,8 @@ func TestAccountManagerUpdateAccountPreservesExistingTokenWhenCredentialsUnchang
 }
 
 func TestAccountManagerUpdateAccountRollsBackOnSaveFailure(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}})
-	loader.saveErr = errors.New("save failed")
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}}, t)
+	loader.saveError = errors.New("save failed")
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
 	tokenStore := tokenstore.NewInMemoryTokenStore()
@@ -237,7 +240,7 @@ func TestAccountManagerUpdateAccountRollsBackOnSaveFailure(t *testing.T) {
 }
 
 func TestAccountManagerUpdateAccountRollsBackOnSecretCommitFailure(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}}, t)
 	secretStore := &failingSecretStore{setErr: errors.New("secret store down"), values: map[string]string{"work-id/client_secret": "old-secret"}}
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{serviceType: calendar.ServiceTypeGoogle, fields: []calendar.AccountField{{Key: "client_secret", Secret: true}}, discoveredCalendars: []calendar.Calendar{{ID: "primary", Name: "Primary"}}}
@@ -259,7 +262,7 @@ func TestAccountManagerUpdateAccountRollsBackOnSecretCommitFailure(t *testing.T)
 }
 
 func TestAccountManagerUpdateAccountRollsBackOnTokenCommitFailure(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
 	tokenStore := &failingTokenStore{setErr: errors.New("token store down")}
@@ -286,7 +289,7 @@ func TestAccountManagerUpdateAccountRollsBackOnTokenCommitFailure(t *testing.T) 
 }
 
 func TestAccountManagerUpdateAccountReturnsWithoutMutatingStateOnUserAbort(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "old-client"}}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-secret")
 	tokenStore := tokenstore.NewInMemoryTokenStore()
@@ -313,7 +316,7 @@ func TestAccountManagerUpdateAccountReturnsWithoutMutatingStateOnUserAbort(t *te
 }
 
 func TestAccountManagerUpdateAccountMergesExistingSecretsForPartialUpdate(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "client-id"}}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "client-id"}}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-client-secret")
 	_ = secretStore.Set(context.Background(), "work-id", "api_key", "existing-api-key")
@@ -388,7 +391,7 @@ func TestMergeSecretsIncludesEmptyOptionalSecretPlaceholder(t *testing.T) {
 }
 
 func TestAccountManagerDeleteAccountRemovesConfigSecretsAndToken(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "secret-value")
 	tokenStore := tokenstore.NewInMemoryTokenStore()
@@ -415,7 +418,7 @@ func TestAccountManagerDeleteAccountRemovesConfigSecretsAndToken(t *testing.T) {
 }
 
 func TestAccountManagerDeleteAccountRollsBackConfigWhenSecretCommitFails(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}, t)
 	secretStore := &failingSecretStore{deleteErr: errors.New("secret store down"), values: map[string]string{"work-id/client_secret": "secret-value"}}
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{serviceType: calendar.ServiceTypeGoogle, fields: []calendar.AccountField{{Key: "client_secret", Secret: true}}}
@@ -431,7 +434,7 @@ func TestAccountManagerDeleteAccountRollsBackConfigWhenSecretCommitFails(t *test
 }
 
 func TestAccountManagerDeleteAccountRollsBackOnTokenCommitFailure(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "secret-value")
 	tokenStore := &failingTokenStore{clearErr: errors.New("token store down")}
@@ -452,7 +455,7 @@ func TestAccountManagerDeleteAccountRollsBackOnTokenCommitFailure(t *testing.T) 
 }
 
 func TestAccountManagerLoginAccountCommitsReplacementToken(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	tokenStore := tokenstore.NewInMemoryTokenStore()
 	service := &stubAppService{serviceType: calendar.ServiceTypeGoogle}
@@ -475,7 +478,7 @@ func TestAccountManagerLoginAccountCommitsReplacementToken(t *testing.T) {
 }
 
 func TestAccountManagerLoginAccountReturnsTokenCommitFailure(t *testing.T) {
-	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}})
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work"}}, t)
 	secretStore := secrets.NewInMemoryStore()
 	tokenStore := &failingTokenStore{setErr: errors.New("token store down")}
 	service := &stubAppService{serviceType: calendar.ServiceTypeGoogle}
@@ -484,6 +487,29 @@ func TestAccountManagerLoginAccountReturnsTokenCommitFailure(t *testing.T) {
 	_, err := manager.LoginAccount(context.Background(), LoginAccountInput{AccountID: "work-id"})
 	if err == nil || !strings.Contains(err.Error(), "persist OAuth token") {
 		t.Fatalf("error = %v, want token persistence error", err)
+	}
+}
+
+func TestJoinCommitRollbackErrorWrapsSecretRollbackError(t *testing.T) {
+	err := joinCommitRollbackError("persist OAuth token", errors.New("commit failed"), nil, errors.New("secret rollback failed"))
+	if err == nil {
+		t.Fatal("joinCommitRollbackError() error = nil")
+	}
+	if !strings.Contains(err.Error(), "restore secret: secret rollback failed") {
+		t.Fatalf("error = %q, want wrapped secret rollback context", err.Error())
+	}
+}
+
+func TestJoinCommitRollbackErrorWrapsBothRollbackErrors(t *testing.T) {
+	err := joinCommitRollbackError("persist OAuth token", errors.New("commit failed"), errors.New("config rollback failed"), errors.New("secret rollback failed"))
+	if err == nil {
+		t.Fatal("joinCommitRollbackError() error = nil")
+	}
+	if !strings.Contains(err.Error(), "restore config: config rollback failed") {
+		t.Fatalf("error = %q, want wrapped config rollback context", err.Error())
+	}
+	if !strings.Contains(err.Error(), "restore secret: secret rollback failed") {
+		t.Fatalf("error = %q, want wrapped secret rollback context", err.Error())
 	}
 }
 
@@ -535,38 +561,98 @@ func (s *stubCalendarSelector) ConfirmEmptyCalendars(context.Context, calendar.A
 }
 
 type memoryConfigLoader struct {
-	cfg      *config.Config
-	lastSnap *config.Config
-	loadErr  error
-	saveErr  error
+	loader    *config.Loader
+	cfg       *config.Config
+	loadError error
+	saveError error
 }
 
-func newMemoryConfigLoader() *memoryConfigLoader { return newMemoryConfigLoaderWithAccounts(nil) }
-func newMemoryConfigLoaderWithAccounts(accounts []calendar.Account) *memoryConfigLoader {
+func newMemoryConfigLoader(tb ...testing.TB) *memoryConfigLoader {
+	return newMemoryConfigLoaderWithAccounts(nil, tb...)
+}
+func newMemoryConfigLoaderWithAccounts(accounts []calendar.Account, tb ...testing.TB) *memoryConfigLoader {
+	var configPath string
+	if len(tb) > 0 && tb[0] != nil {
+		tb[0].Helper()
+		configPath = filepath.Join(tb[0].TempDir(), "config.json")
+	} else {
+		tempDir, err := os.MkdirTemp("", "waybar-next-events-test-*")
+		if err != nil {
+			panic(fmt.Sprintf("create temp dir: %v", err))
+		}
+		configPath = filepath.Join(tempDir, "config.json")
+	}
+
 	cfg := &config.Config{Accounts: accounts}
 	cfg.Normalize()
-	return &memoryConfigLoader{cfg: cfg}
+
+	loader := &memoryConfigLoader{
+		loader: config.NewLoaderWithPath(configPath),
+		cfg:    cloneConfig(cfg),
+	}
+
+	if len(cfg.Accounts) > 0 {
+		if err := loader.loader.Save(cloneConfig(cfg)); err != nil {
+			if len(tb) > 0 && tb[0] != nil {
+				tb[0].Fatalf("seed config loader: %v", err)
+			}
+			panic(fmt.Sprintf("seed config loader: %v", err))
+		}
+		if err := loader.syncConfigState(); err != nil {
+			if len(tb) > 0 && tb[0] != nil {
+				tb[0].Fatalf("sync config state: %v", err)
+			}
+			panic(fmt.Sprintf("sync config state: %v", err))
+		}
+	}
+
+	return loader
 }
 func (l *memoryConfigLoader) Load() (*config.Config, error) {
-	if l.loadErr != nil {
-		return nil, l.loadErr
+	if l.loadError != nil {
+		return nil, l.loadError
 	}
 	return cloneConfig(l.cfg), nil
 }
-func (l *memoryConfigLoader) LoadOrEmpty() (*config.Config, error) { return l.Load() }
+func (l *memoryConfigLoader) LoadOrEmpty() (*config.Config, error) {
+	if l.loadError != nil {
+		return nil, l.loadError
+	}
+	return cloneConfig(l.cfg), nil
+}
 func (l *memoryConfigLoader) Save(cfg *config.Config) error {
-	if l.saveErr != nil {
-		return l.saveErr
+	if l.saveError != nil {
+		return l.saveError
+	}
+	if err := l.loader.Save(cfg); err != nil {
+		return err
 	}
 	l.cfg = cloneConfig(cfg)
 	return nil
 }
 func (l *memoryConfigLoader) Snapshot() (config.Snapshot, error) {
-	l.lastSnap = cloneConfig(l.cfg)
-	return config.Snapshot{}, nil
+	return l.loader.Snapshot()
 }
-func (l *memoryConfigLoader) RestoreSnapshot(config.Snapshot) error {
-	l.cfg = cloneConfig(l.lastSnap)
+func (l *memoryConfigLoader) RestoreSnapshot(snapshot config.Snapshot) error {
+	if err := l.loader.RestoreSnapshot(snapshot); err != nil {
+		return err
+	}
+	return l.syncConfigState()
+}
+
+func (l *memoryConfigLoader) syncConfigState() error {
+	typedCfg, err := l.loader.Load()
+	if err != nil {
+		var notFound *config.ErrConfigNotFound
+		if errors.As(err, &notFound) {
+			l.cfg = &config.Config{}
+			l.cfg.Normalize()
+			return nil
+		}
+		return err
+	}
+	l.cfg = cloneConfig(typedCfg)
+
 	return nil
 }
 

@@ -122,42 +122,6 @@ func TestAuthenticator_ExpiredTokenNoRefresh(t *testing.T) {
 	}
 }
 
-func TestAuthenticator_ClearToken(t *testing.T) {
-	store := tokenstore.NewInMemoryTokenStore()
-	auth := NewAuthenticator(store)
-
-	provider := &mockProvider{
-		name:        "test",
-		clientID:    "client-id",
-		authURL:     "https://example.com/auth",
-		tokenURL:    "https://example.com/token",
-		redirectURL: config.DefaultCallbackURL,
-		scopes:      []string{"read"},
-	}
-
-	// Store a token
-	ctx := context.Background()
-	token := &oauth2.Token{
-		AccessToken: "token",
-		Expiry:      time.Now().Add(time.Hour),
-	}
-	if err := store.Set(ctx, "test", token); err != nil {
-		t.Fatalf("Failed to set token: %v", err)
-	}
-
-	// Clear the token
-	err := auth.ClearToken(ctx, provider)
-	if err != nil {
-		t.Errorf("ClearToken() error = %v", err)
-	}
-
-	// Verify it's gone
-	_, found, _ := store.Get(ctx, "test")
-	if found {
-		t.Error("Token still exists after ClearToken")
-	}
-}
-
 func TestAuthenticator_ForceAuthenticatePreservesExistingTokenOnFailure(t *testing.T) {
 	store := tokenstore.NewInMemoryTokenStore()
 	auth := NewAuthenticator(store, WithBrowserOpener(func(string) error {

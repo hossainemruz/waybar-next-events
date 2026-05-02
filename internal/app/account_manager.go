@@ -291,6 +291,8 @@ func (m *AccountManager) LoginAccount(ctx context.Context, input LoginAccountInp
 		return calendar.Account{}, err
 	}
 
+	// LoginAccount only replaces the persisted OAuth token. It does not mutate
+	// config, so there is no config state to snapshot and roll back here.
 	if err := stagedTokens.Commit(ctx, m.tokenStore); err != nil {
 		return calendar.Account{}, fmt.Errorf("persist OAuth token: %w", err)
 	}
@@ -561,13 +563,13 @@ func deleteAccountByID(accounts []calendar.Account, accountID string) []calendar
 func joinCommitRollbackError(action string, commitErr, configRollbackErr, secretRollbackErr error) error {
 	wrapped := fmt.Errorf("%s: %w", action, commitErr)
 	if configRollbackErr != nil && secretRollbackErr != nil {
-		return errors.Join(wrapped, fmt.Errorf("restore config: %w", configRollbackErr), secretRollbackErr)
+		return errors.Join(wrapped, fmt.Errorf("restore config: %w", configRollbackErr), fmt.Errorf("restore secret: %w", secretRollbackErr))
 	}
 	if configRollbackErr != nil {
 		return errors.Join(wrapped, fmt.Errorf("restore config: %w", configRollbackErr))
 	}
 	if secretRollbackErr != nil {
-		return errors.Join(wrapped, secretRollbackErr)
+		return errors.Join(wrapped, fmt.Errorf("restore secret: %w", secretRollbackErr))
 	}
 	return wrapped
 }

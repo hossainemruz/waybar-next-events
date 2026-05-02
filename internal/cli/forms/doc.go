@@ -1,2 +1,2 @@
-// Package forms is the planned home for reusable CLI form helpers.
+// Package forms contains reusable CLI form helpers.
 package forms
