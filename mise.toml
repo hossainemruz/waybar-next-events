@@ -25,7 +25,7 @@ run = "go mod tidy"
 
 [tasks.ci]
 description = "Run all CI checks (format, lint, test)"
-depends = ["format", "lint", "test", "tidy"]
+depends = ["build", "format", "lint", "test", "tidy"]
 
 [tasks.dev]
 description = "Run the project in development mode"

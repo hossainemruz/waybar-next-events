@@ -12,3 +12,6 @@ bin/
 # .idea/
 # .vscode/
 .opencode/
+
+# Test artifacts
+coverage.out
