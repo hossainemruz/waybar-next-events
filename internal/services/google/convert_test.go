@@ -1,11 +1,11 @@
-package calendars
+package google
 
 import (
 	"testing"
 	"time"
 
-	"github.com/hossainemruz/waybar-next-events/pkg/types"
-	"google.golang.org/api/calendar/v3"
+	"github.com/hossainemruz/waybar-next-events/internal/calendar"
+	googlecalendar "google.golang.org/api/calendar/v3"
 )
 
 func Test_parseEventTime(t *testing.T) {
@@ -13,134 +13,132 @@ func Test_parseEventTime(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		event     calendar.Event
+		event     googlecalendar.Event
 		wantStart time.Time
 		wantEnd   time.Time
 		wantErr   bool
 	}{
 		{
 			name: "both start and end have DateTime (RFC3339)",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T10:00:00+02:00"},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T11:00:00+02:00"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00+02:00"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00+02:00"},
 			},
 			wantStart: time.Date(2025, 6, 15, 10, 0, 0, 0, time.FixedZone("", 2*3600)),
 			wantEnd:   time.Date(2025, 6, 15, 11, 0, 0, 0, time.FixedZone("", 2*3600)),
 		},
 		{
 			name: "both start and end have DateTime in UTC",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T08:00:00Z"},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T09:30:00Z"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T08:00:00Z"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T09:30:00Z"},
 			},
 			wantStart: time.Date(2025, 6, 15, 8, 0, 0, 0, time.UTC),
 			wantEnd:   time.Date(2025, 6, 15, 9, 30, 0, 0, time.UTC),
 		},
 		{
 			name: "all-day event (date only, single day)",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{Date: "2025-06-15"},
-				End:   &calendar.EventDateTime{Date: "2025-06-16"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{Date: "2025-06-15"},
+				End:   &googlecalendar.EventDateTime{Date: "2025-06-16"},
 			},
-			// Start = start of June 15, End = end of June 15 (previous day of End.Date)
 			wantStart: time.Date(2025, 6, 15, 0, 0, 0, 0, loc),
-			wantEnd:   time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc),
+			wantEnd:   time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc),
 		},
 		{
 			name: "all-day event spanning multiple days",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{Date: "2025-06-15"},
-				End:   &calendar.EventDateTime{Date: "2025-06-18"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{Date: "2025-06-15"},
+				End:   &googlecalendar.EventDateTime{Date: "2025-06-18"},
 			},
-			// Start = start of June 15, End = end of June 17
 			wantStart: time.Date(2025, 6, 15, 0, 0, 0, 0, loc),
-			wantEnd:   time.Date(2025, 6, 17, 23, 59, 59, types.EndOfDayNano, loc),
+			wantEnd:   time.Date(2025, 6, 17, 23, 59, 59, calendar.EndOfDayNano, loc),
 		},
 		{
 			name: "start has DateTime, end has Date only",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T14:00:00Z"},
-				End:   &calendar.EventDateTime{Date: "2025-06-16"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T14:00:00Z"},
+				End:   &googlecalendar.EventDateTime{Date: "2025-06-16"},
 			},
 			wantStart: time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC),
-			wantEnd:   time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc),
+			wantEnd:   time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc),
 		},
 		{
 			name: "start has Date only, end has DateTime",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{Date: "2025-06-15"},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T18:00:00Z"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{Date: "2025-06-15"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T18:00:00Z"},
 			},
 			wantStart: time.Date(2025, 6, 15, 0, 0, 0, 0, loc),
 			wantEnd:   time.Date(2025, 6, 15, 18, 0, 0, 0, time.UTC),
 		},
 		{
 			name: "invalid start DateTime format",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "not-a-date"},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "not-a-date"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid end DateTime format",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z"},
-				End:   &calendar.EventDateTime{DateTime: "not-a-date"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z"},
+				End:   &googlecalendar.EventDateTime{DateTime: "not-a-date"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid start Date format",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{Date: "15/06/2025"},
-				End:   &calendar.EventDateTime{Date: "2025-06-16"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{Date: "15/06/2025"},
+				End:   &googlecalendar.EventDateTime{Date: "2025-06-16"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid end Date format",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{Date: "2025-06-15"},
-				End:   &calendar.EventDateTime{Date: "16-Jun-2025"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{Date: "2025-06-15"},
+				End:   &googlecalendar.EventDateTime{Date: "16-Jun-2025"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty start DateTime and Date (both zero-value)",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty end DateTime and Date (both zero-value)",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z"},
-				End:   &calendar.EventDateTime{},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z"},
+				End:   &googlecalendar.EventDateTime{},
 			},
 			wantErr: true,
 		},
 		{
 			name: "nil Start pointer",
-			event: calendar.Event{
+			event: googlecalendar.Event{
 				Start: nil,
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "nil End pointer",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z"},
 				End:   nil,
 			},
 			wantErr: true,
 		},
 		{
 			name: "both Start and End nil",
-			event: calendar.Event{
+			event: googlecalendar.Event{
 				Start: nil,
 				End:   nil,
 			},
@@ -148,19 +146,18 @@ func Test_parseEventTime(t *testing.T) {
 		},
 		{
 			name: "DateTime takes precedence over Date when both are set",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z", Date: "2025-06-20"},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z", Date: "2025-06-20"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00Z", Date: "2025-06-20"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00Z", Date: "2025-06-20"},
 			},
-			// DateTime should be used, not Date
 			wantStart: time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
 			wantEnd:   time.Date(2025, 6, 15, 11, 0, 0, 0, time.UTC),
 		},
 		{
 			name: "negative timezone offset",
-			event: calendar.Event{
-				Start: &calendar.EventDateTime{DateTime: "2025-06-15T10:00:00-05:00"},
-				End:   &calendar.EventDateTime{DateTime: "2025-06-15T11:00:00-05:00"},
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00-05:00"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00-05:00"},
 			},
 			wantStart: time.Date(2025, 6, 15, 10, 0, 0, 0, time.FixedZone("", -5*3600)),
 			wantEnd:   time.Date(2025, 6, 15, 11, 0, 0, 0, time.FixedZone("", -5*3600)),
@@ -192,20 +189,18 @@ func Test_parseEventTime(t *testing.T) {
 func Test_convertGoogleCalendarEvents(t *testing.T) {
 	loc := time.Now().Location()
 
-	// Helper to create a pointer to EventDateTime
-	edt := func(dateTime, date string) *calendar.EventDateTime {
-		return &calendar.EventDateTime{DateTime: dateTime, Date: date}
+	edt := func(dateTime, date string) *googlecalendar.EventDateTime {
+		return &googlecalendar.EventDateTime{DateTime: dateTime, Date: date}
 	}
 
-	// Fixed "today" for deterministic tests: 2025-06-15
 	today := time.Date(2025, 6, 15, 0, 0, 0, 0, loc)
 
 	tests := []struct {
 		name     string
-		gEvents  []*calendar.Event
+		gEvents  []*googlecalendar.Event
 		dayLimit int
 		today    time.Time
-		want     []types.Event
+		want     []calendar.Event
 		wantErr  bool
 	}{
 		{
@@ -213,18 +208,18 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			gEvents:  nil,
 			dayLimit: 4,
 			today:    today,
-			want:     []types.Event{},
+			want:     []calendar.Event{},
 		},
 		{
 			name:     "empty slice input returns empty slice",
-			gEvents:  []*calendar.Event{},
+			gEvents:  []*googlecalendar.Event{},
 			dayLimit: 4,
 			today:    today,
-			want:     []types.Event{},
+			want:     []calendar.Event{},
 		},
 		{
 			name: "single timed event",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Standup",
 					Start:   edt("2025-06-15T09:00:00Z", ""),
@@ -233,13 +228,13 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
+			want: []calendar.Event{
 				{Title: "Standup", Start: time.Date(2025, 6, 15, 9, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 9, 30, 0, 0, time.UTC)},
 			},
 		},
 		{
 			name: "multiple timed events",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Meeting A",
 					Start:   edt("2025-06-15T10:00:00Z", ""),
@@ -253,14 +248,14 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
+			want: []calendar.Event{
 				{Title: "Meeting A", Start: time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 11, 0, 0, 0, time.UTC)},
 				{Title: "Meeting B", Start: time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 15, 0, 0, 0, time.UTC)},
 			},
 		},
 		{
 			name: "single all-day event (date only)",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Holiday",
 					Start:   edt("", "2025-06-15"),
@@ -269,13 +264,13 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
-				{Title: "Holiday", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Holiday", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
 			},
 		},
 		{
 			name: "event with invalid start time returns error",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Bad Event",
 					Start:   edt("bad-time", ""),
@@ -288,7 +283,7 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 		},
 		{
 			name: "event with nil Start returns error",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Nil Start",
 					Start:   nil,
@@ -301,14 +296,14 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 		},
 		{
 			name:     "dayLimit of 0 with no events",
-			gEvents:  []*calendar.Event{},
+			gEvents:  []*googlecalendar.Event{},
 			dayLimit: 0,
 			today:    today,
-			want:     []types.Event{},
+			want:     []calendar.Event{},
 		},
 		{
 			name: "event with empty summary gets default title",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "",
 					Start:   edt("2025-06-15T10:00:00Z", ""),
@@ -317,16 +312,13 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
+			want: []calendar.Event{
 				{Title: "<Event title missing>", Start: time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 11, 0, 0, 0, time.UTC)},
 			},
 		},
-		// dayLimit tests with multi-day events
 		{
-			// today=Jun 15, dayLimit=4 covers Jun 15 - Jun 18
-			// Event: Jun 15 - Jun 17 (ends before the day limit)
 			name: "multi-day event ends before the day limit",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Conference",
 					Start:   edt("", "2025-06-15"),
@@ -335,16 +327,14 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
-				{Title: "Conference", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc)},
-				{Title: "Conference", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Conference", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
+				{Title: "Conference", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, calendar.EndOfDayNano, loc)},
 			},
 		},
 		{
-			// today=Jun 15, dayLimit=3 covers Jun 15 - Jun 17
-			// Event: Jun 15 - Jun 20 (ends after the day limit)
 			name: "multi-day event ends after the day limit",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Long Trip",
 					Start:   edt("", "2025-06-15"),
@@ -353,17 +343,15 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 3,
 			today:    today,
-			want: []types.Event{
-				{Title: "Long Trip", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc)},
-				{Title: "Long Trip", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, types.EndOfDayNano, loc)},
-				{Title: "Long Trip", Start: time.Date(2025, 6, 17, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 17, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Long Trip", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
+				{Title: "Long Trip", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, calendar.EndOfDayNano, loc)},
+				{Title: "Long Trip", Start: time.Date(2025, 6, 17, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 17, 23, 59, 59, calendar.EndOfDayNano, loc)},
 			},
 		},
 		{
-			// today=Jun 15, dayLimit=2 covers Jun 15 - Jun 16
-			// Event: Jun 18 - Jun 20 (starts after the day limit window)
 			name: "multi-day event starts after the day limit",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Future Trip",
 					Start:   edt("", "2025-06-18"),
@@ -372,14 +360,11 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 2,
 			today:    today,
-			want:     []types.Event{},
+			want:     []calendar.Event{},
 		},
-		// Multi-day event that started in the past (before today)
 		{
-			// today=Jun 15, dayLimit=4 covers Jun 15 - Jun 18
-			// Event: Jun 13 - Jun 17 (started 2 days ago, still ongoing)
 			name: "multi-day event started in the past",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Ongoing Sprint",
 					Start:   edt("", "2025-06-13"),
@@ -388,17 +373,14 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
-				{Title: "Ongoing Sprint", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc)},
-				{Title: "Ongoing Sprint", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Ongoing Sprint", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
+				{Title: "Ongoing Sprint", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, calendar.EndOfDayNano, loc)},
 			},
 		},
-		// Multi-day event that starts in the future (within day limit)
 		{
-			// today=Jun 15, dayLimit=4 covers Jun 15 - Jun 18
-			// Event: Jun 17 - Jun 20 (starts in 2 days)
 			name: "multi-day event starts in the future",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Upcoming Workshop",
 					Start:   edt("", "2025-06-17"),
@@ -407,17 +389,14 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
-				{Title: "Upcoming Workshop", Start: time.Date(2025, 6, 17, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 17, 23, 59, 59, types.EndOfDayNano, loc)},
-				{Title: "Upcoming Workshop", Start: time.Date(2025, 6, 18, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 18, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Upcoming Workshop", Start: time.Date(2025, 6, 17, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 17, 23, 59, 59, calendar.EndOfDayNano, loc)},
+				{Title: "Upcoming Workshop", Start: time.Date(2025, 6, 18, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 18, 23, 59, 59, calendar.EndOfDayNano, loc)},
 			},
 		},
-		// Multi-day timed event (DateTime, not date-only)
 		{
-			// today=Jun 15, dayLimit=4 covers Jun 15 - Jun 18
-			// Event: Jun 15 14:00 - Jun 17 10:00 (timed, spans 2+ days)
 			name: "multi-day timed event",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Hackathon",
 					Start:   edt("2025-06-15T14:00:00Z", ""),
@@ -426,16 +405,15 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
-				{Title: "Hackathon", Start: time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc)},
-				{Title: "Hackathon", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Hackathon", Start: time.Date(2025, 6, 15, 14, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
+				{Title: "Hackathon", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, calendar.EndOfDayNano, loc)},
 				{Title: "Hackathon", Start: time.Date(2025, 6, 17, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 17, 10, 0, 0, 0, time.UTC)},
 			},
 		},
-		// Timed event with same start and end time
 		{
 			name: "timed event with same start and end time",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Reminder",
 					Start:   edt("2025-06-15T12:00:00Z", ""),
@@ -444,14 +422,13 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
+			want: []calendar.Event{
 				{Title: "Reminder", Start: time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC), End: time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)},
 			},
 		},
-		// Date-only event with same start and end date
 		{
 			name: "date-only event with same start and end date",
-			gEvents: []*calendar.Event{
+			gEvents: []*googlecalendar.Event{
 				{
 					Summary: "Same Day",
 					Start:   edt("", "2025-06-15"),
@@ -460,9 +437,8 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 			},
 			dayLimit: 4,
 			today:    today,
-			want: []types.Event{
-				// When start and end dates are the same, the event is a full day on that date.
-				{Title: "Same Day", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, types.EndOfDayNano, loc)},
+			want: []calendar.Event{
+				{Title: "Same Day", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
 			},
 		},
 	}
