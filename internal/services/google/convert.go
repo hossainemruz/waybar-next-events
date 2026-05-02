@@ -103,6 +103,9 @@ func parseEventTime(event googlecalendar.Event) (time.Time, time.Time, error) {
 			return time.Time{}, time.Time{}, err
 		}
 	} else {
+		// Google Calendar uses exclusive end dates for all-day events
+		// (e.g. a single-day event on Jun 15 has End.Date = "Jun 16").
+		// When start and end dates are the same, the event is a full day on that date.
 		if event.Start.Date == event.End.Date {
 			end, err = endOfDate(event.End.Date)
 		} else {

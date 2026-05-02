@@ -21,15 +21,15 @@ func (s *Service) Provider(ctx context.Context, account calendar.Account, secret
 
 	clientID := strings.TrimSpace(account.Setting(clientIDKey))
 	if clientID == "" {
-		return nil, fmt.Errorf("missing required setting %q", clientIDKey)
+		return nil, fmt.Errorf("missing required setting %s", clientIDKey)
 	}
 
 	clientSecret, err := secretStore.Get(ctx, account.ID, clientSecretKey)
 	if err != nil {
 		if errors.Is(err, secrets.ErrSecretNotFound) {
-			return nil, fmt.Errorf("missing stored secret %q", clientSecretKey)
+			return nil, fmt.Errorf("missing stored secret %s", clientSecretKey)
 		}
-		return nil, fmt.Errorf("load stored secret %q: %w", clientSecretKey, err)
+		return nil, fmt.Errorf("load stored secret %s: %w", clientSecretKey, err)
 	}
 
 	return providers.NewGoogle(
