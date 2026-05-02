@@ -22,6 +22,21 @@ func TestService_Provider(t *testing.T) {
 		}
 	})
 
+	t.Run("missing client_id", func(t *testing.T) {
+		account := calendar.Account{
+			ID:       "acc-1",
+			Settings: map[string]string{},
+		}
+		store := secrets.NewInMemoryStore()
+		if err := store.Set(ctx, account.ID, clientSecretKey, "my-secret"); err != nil {
+			t.Fatalf("setup secret: %v", err)
+		}
+		_, err := srv.Provider(ctx, account, store)
+		if err == nil {
+			t.Fatal("expected error for missing client id")
+		}
+	})
+
 	t.Run("missing client_secret", func(t *testing.T) {
 		account := calendar.Account{
 			ID:       "acc-1",

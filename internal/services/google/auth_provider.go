@@ -19,6 +19,11 @@ func (s *Service) Provider(ctx context.Context, account calendar.Account, secret
 		return nil, fmt.Errorf("account ID cannot be empty")
 	}
 
+	clientID := strings.TrimSpace(account.Setting(clientIDKey))
+	if clientID == "" {
+		return nil, fmt.Errorf("missing required setting %q", clientIDKey)
+	}
+
 	clientSecret, err := secretStore.Get(ctx, account.ID, clientSecretKey)
 	if err != nil {
 		if errors.Is(err, secrets.ErrSecretNotFound) {
@@ -29,7 +34,7 @@ func (s *Service) Provider(ctx context.Context, account calendar.Account, secret
 
 	return providers.NewGoogle(
 		account.ID,
-		account.Setting(clientIDKey),
+		clientID,
 		clientSecret,
 		[]string{googlecalendar.CalendarReadonlyScope},
 	), nil
