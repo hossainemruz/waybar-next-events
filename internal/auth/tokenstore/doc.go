@@ -1,2 +1,2 @@
-// Package tokenstore is the planned home for token persistence helpers.
+// Package tokenstore contains token persistence helpers.
 package tokenstore

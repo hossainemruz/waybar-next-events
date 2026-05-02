@@ -1,2 +1,2 @@
-// Package auth is the planned home for authentication infrastructure.
+// Package auth contains authentication infrastructure.
 package auth

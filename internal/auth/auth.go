@@ -184,19 +184,6 @@ func (a *Authenticator) HTTPClient(ctx context.Context, provider providers.Provi
 	return oauth2.NewClient(ctx, tokenSource), nil
 }
 
-// ClearToken removes the stored token for the provider.
-func (a *Authenticator) ClearToken(ctx context.Context, provider providers.Provider) error {
-	if err := providers.Validate(provider); err != nil {
-		return fmt.Errorf("invalid provider: %w", err)
-	}
-
-	if err := a.store.Clear(ctx, provider.Name()); err != nil {
-		return fmt.Errorf("failed to clear token: %w", err)
-	}
-
-	return nil
-}
-
 // refreshToken attempts to refresh an expired token.
 func (a *Authenticator) refreshToken(ctx context.Context, provider providers.Provider, token *oauth2.Token) (*oauth2.Token, error) {
 	config := providers.ToOAuth2Config(provider)
