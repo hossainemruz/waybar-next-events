@@ -100,4 +100,30 @@ func TestService_FetchEvents(t *testing.T) {
 			t.Fatalf("expected 0 events, got %d", len(events))
 		}
 	})
+
+	t.Run("fallback primary calendar error includes contextual hint", func(t *testing.T) {
+		body := `{"error": {"code": 404, "message": "Not Found"}}`
+		client := &http.Client{
+			Transport: &mockEventsTransport{body: body, statusCode: http.StatusNotFound},
+		}
+
+		account := calendar.Account{
+			ID:   "acc-1",
+			Name: "Test",
+			// No calendars selected
+		}
+		query := calendar.EventQuery{
+			Now:      time.Date(2025, 6, 15, 0, 0, 0, 0, loc),
+			DayLimit: 4,
+		}
+
+		_, err := srv.FetchEvents(ctx, account, query, client)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		want := "no calendars selected for account"
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error message does not contain %q:\n  got: %v", want, err)
+		}
+	})
 }

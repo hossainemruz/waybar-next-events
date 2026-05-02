@@ -166,7 +166,7 @@ func Test_parseEventTime(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotStart, gotEnd, err := parseEventTime(tt.event)
+			gotStart, gotEnd, err := parseEventTime(tt.event, loc)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil (start=%v, end=%v)", gotStart, gotEnd)
@@ -183,6 +183,49 @@ func Test_parseEventTime(t *testing.T) {
 				t.Errorf("end mismatch:\n  got:  %v\n  want: %v", gotEnd, tt.wantEnd)
 			}
 		})
+	}
+}
+
+func Test_parseEventTime_nonLocalTimezone(t *testing.T) {
+	// Use a fixed non-local timezone to verify date-only parsing does not
+	// depend on the machine's local timezone.
+	loc := time.FixedZone("Asia/Dhaka", 6*3600)
+
+	gotStart, gotEnd, err := parseEventTime(googlecalendar.Event{
+		Start: &googlecalendar.EventDateTime{Date: "2025-06-15"},
+		End:   &googlecalendar.EventDateTime{Date: "2025-06-16"},
+	}, loc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantStart := time.Date(2025, 6, 15, 0, 0, 0, 0, loc)
+	wantEnd := time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)
+
+	if !gotStart.Equal(wantStart) {
+		t.Errorf("start mismatch:\n  got:  %v\n  want: %v", gotStart, wantStart)
+	}
+	if !gotEnd.Equal(wantEnd) {
+		t.Errorf("end mismatch:\n  got:  %v\n  want: %v", gotEnd, wantEnd)
+	}
+
+	// Multi-day all-day event
+	gotStart, gotEnd, err = parseEventTime(googlecalendar.Event{
+		Start: &googlecalendar.EventDateTime{Date: "2025-06-15"},
+		End:   &googlecalendar.EventDateTime{Date: "2025-06-18"},
+	}, loc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantStart = time.Date(2025, 6, 15, 0, 0, 0, 0, loc)
+	wantEnd = time.Date(2025, 6, 17, 23, 59, 59, calendar.EndOfDayNano, loc)
+
+	if !gotStart.Equal(wantStart) {
+		t.Errorf("multi-day start mismatch:\n  got:  %v\n  want: %v", gotStart, wantStart)
+	}
+	if !gotEnd.Equal(wantEnd) {
+		t.Errorf("multi-day end mismatch:\n  got:  %v\n  want: %v", gotEnd, wantEnd)
 	}
 }
 
@@ -470,5 +513,53 @@ func Test_convertGoogleCalendarEvents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func Test_convertGoogleCalendarEvents_nonLocalTimezone(t *testing.T) {
+	loc := time.FixedZone("Asia/Dhaka", 6*3600)
+	today := time.Date(2025, 6, 15, 0, 0, 0, 0, loc)
+
+	edt := func(dateTime, date string) *googlecalendar.EventDateTime {
+		return &googlecalendar.EventDateTime{DateTime: dateTime, Date: date}
+	}
+
+	gEvents := []*googlecalendar.Event{
+		{
+			Summary: "Holiday",
+			Start:   edt("", "2025-06-15"),
+			End:     edt("", "2025-06-16"),
+		},
+		{
+			Summary: "Conference",
+			Start:   edt("", "2025-06-15"),
+			End:     edt("", "2025-06-17"),
+		},
+	}
+
+	got, err := convertGoogleEvents(gEvents, 4, today)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := []calendar.Event{
+		{Title: "Holiday", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
+		{Title: "Conference", Start: time.Date(2025, 6, 15, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 15, 23, 59, 59, calendar.EndOfDayNano, loc)},
+		{Title: "Conference", Start: time.Date(2025, 6, 16, 0, 0, 0, 0, loc), End: time.Date(2025, 6, 16, 23, 59, 59, calendar.EndOfDayNano, loc)},
+	}
+
+	if len(got) != len(want) {
+		t.Fatalf("length mismatch: got %d events, want %d events\n  got:  %+v\n  want: %+v", len(got), len(want), got, want)
+	}
+	for i := range got {
+		if got[i].Title != want[i].Title {
+			t.Errorf("event[%d] title mismatch: got %q, want %q", i, got[i].Title, want[i].Title)
+		}
+		if !got[i].Start.Equal(want[i].Start) {
+			t.Errorf("event[%d] start mismatch:\n  got:  %v\n  want: %v", i, got[i].Start, want[i].Start)
+		}
+		if !got[i].End.Equal(want[i].End) {
+			t.Errorf("event[%d] end mismatch:\n  got:  %v\n  want: %v", i, got[i].End, want[i].End)
+		}
 	}
 }
