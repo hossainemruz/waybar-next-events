@@ -9,7 +9,7 @@ run = "go build -o bin/waybar-next-events ./cmd/waybar-next-events"
 
 [tasks.format]
 description = "Format Go source files"
-run = "goimports -w . && gofmt -w ."
+run = "goimports -w ."
 
 [tasks.lint]
 description = "Lint Go source files using golangci-lint"
@@ -23,8 +23,8 @@ run = "go test ./..."
 description = "Run go mod tidy"
 run = "go mod tidy"
 
-[tasks.ci]
-description = "Run all CI checks (build, format, lint, test, tidy)"
+[tasks.all]
+description = "Run all checks (build, format, lint, test, tidy)"
 depends = ["build", "format", "lint", "test", "tidy"]
 
 [tasks.dev]
