@@ -255,13 +255,14 @@ func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers
 	// Start callback server
 	callbackServer, err := NewCallbackServer(state)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start callback server: %w", err)
+		return nil, fmt.Errorf("failed to create callback server: %w", err)
 	}
 	defer callbackServer.Shutdown()
 
 	// Start server and wait for it to be ready
-	ready := callbackServer.Start()
-	<-ready // Wait for server to start accepting connections
+	if err := callbackServer.Start(); err != nil {
+		return nil, fmt.Errorf("callback server failed to become ready: %w", err)
+	}
 
 	slog.Debug("callback server started", "provider", provider.Name(), "url", callbackServer.URL())
 
