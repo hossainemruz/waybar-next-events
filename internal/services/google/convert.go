@@ -37,7 +37,7 @@ func convertGoogleEvents(gEvents []*googlecalendar.Event, dayLimit int, today ti
 				if err != nil {
 					return nil, err
 				}
-				if !eventStartToday(eventStartTime, dayEnd) {
+				if !eventStartsBeforeDayEnd(eventStartTime, dayEnd) {
 					continue
 				}
 				if eventEnded(eventEndTime, dayStart) {
@@ -87,7 +87,7 @@ func parseEventTime(event googlecalendar.Event, loc *time.Location) (time.Time, 
 	var err error
 
 	if event.Start.DateTime != "" {
-		start, err = time.Parse(time.RFC3339, event.Start.DateTime)
+		start, err = parseRFC3339(event.Start.DateTime)
 		if err != nil {
 			return time.Time{}, time.Time{}, err
 		}
@@ -99,14 +99,16 @@ func parseEventTime(event googlecalendar.Event, loc *time.Location) (time.Time, 
 	}
 
 	if event.End.DateTime != "" {
-		end, err = time.Parse(time.RFC3339, event.End.DateTime)
+		end, err = parseRFC3339(event.End.DateTime)
 		if err != nil {
 			return time.Time{}, time.Time{}, err
 		}
 	} else {
 		// Google Calendar uses exclusive end dates for all-day events
 		// (e.g. a single-day event on Jun 15 has End.Date = "Jun 16").
-		// When start and end dates are the same, the event is a full day on that date.
+		// Per the API spec, Start.Date and End.Date should never be equal for
+		// well-formed data. When they are equal, this is treated as a defensive
+		// fallback: the event is interpreted as a full day on that date.
 		if event.Start.Date == event.End.Date {
 			end, err = endOfDate(event.End.Date, loc)
 		} else {
@@ -124,23 +126,45 @@ func parseEventTime(event googlecalendar.Event, loc *time.Location) (time.Time, 
 	return start, end, nil
 }
 
-// isMultiDayEvent returns true when an event spans more than 24 hours.
-// The 1-minute margin provides a small tolerance for events that are
-// technically slightly longer than 24h due to clock granularity or
-// provider-side rounding, ensuring they are treated as multi-day.
+// parseRFC3339 parses an RFC 3339 timestamp, accepting both fractional-second
+// and non-fractional-second formats. It tries time.RFC3339Nano first (which
+// handles sub-second precision), then falls back to time.RFC3339.
+func parseRFC3339(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
+}
+
+// isMultiDayEvent returns true when an event spans more than 24 hours plus a
+// 1-minute tolerance. The tolerance accounts for events that are technically
+// slightly longer than 24h due to clock granularity or provider-side rounding.
+//
+// Note: A timed event that starts and ends at exactly midnight (duration ==
+// 24h) is NOT classified as multi-day. Such events are treated as a single
+// same-day occurrence. If the intent is to classify exactly-24h events as
+// multi-day, the threshold should be changed to >= 24*time.Hour.
 func isMultiDayEvent(start, end time.Time) bool {
 	return end.Sub(start) > 24*time.Hour+1*time.Minute
 }
 
-func eventStartToday(eventStartTime, dayEnd time.Time) bool {
+// eventStartsBeforeDayEnd returns true when the event starts before the end
+// of the given day. The name clarifies that this checks a boundary condition
+// against an arbitrary day, not specifically "today".
+func eventStartsBeforeDayEnd(eventStartTime, dayEnd time.Time) bool {
 	return eventStartTime.Before(dayEnd)
 }
 
 // eventEnded returns true when the event has ended before the given dayStart.
-// The 1-minute margin provides a safety buffer for boundary comparisons so
-// that events ending exactly at dayStart (e.g. an all-day event whose
-// inclusive end time was computed as the last nanosecond of the previous day)
-// are not incorrectly treated as continuing into the new day.
+// The 1-minute buffer subtracts from eventEndTime to handle boundary edge
+// cases: events whose computed End time lands exactly at dayStart (e.g. an
+// all-day event whose inclusive end was the last nanosecond of the previous
+// day) are not incorrectly treated as continuing into the new day.
+//
+// Tradeoff: events that genuinely end within 1 minute after midnight will be
+// excluded from that day's display. This is acceptable because sub-minute end
+// times past midnight are rare in practice and the buffer prevents far more
+// common all-day boundary misclassifications.
 func eventEnded(eventEndTime, dayStart time.Time) bool {
 	return eventEndTime.Add(-1 * time.Minute).Before(dayStart)
 }
