@@ -45,6 +45,10 @@ func NewAccountID() (string, error) {
 
 // Normalize prepares the config for deterministic persistence.
 func (c *Config) Normalize() {
+	if c == nil {
+		return
+	}
+
 	if c.Accounts == nil {
 		c.Accounts = []calendar.Account{}
 		return
@@ -59,6 +63,39 @@ func (c *Config) Normalize() {
 	})
 }
 
+// Clone returns a deep copy of the Config.
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+
+	cloned := &Config{
+		Accounts: make([]calendar.Account, len(c.Accounts)),
+	}
+
+	for i, account := range c.Accounts {
+		cloned.Accounts[i] = calendar.Account{
+			ID:      account.ID,
+			Service: account.Service,
+			Name:    account.Name,
+		}
+
+		if account.Settings != nil {
+			cloned.Accounts[i].Settings = make(map[string]string, len(account.Settings))
+			for k, v := range account.Settings {
+				cloned.Accounts[i].Settings[k] = v
+			}
+		}
+
+		if account.Calendars != nil {
+			cloned.Accounts[i].Calendars = make([]calendar.CalendarRef, len(account.Calendars))
+			copy(cloned.Accounts[i].Calendars, account.Calendars)
+		}
+	}
+
+	return cloned
+}
+
 // Validate checks config invariants.
 func (c *Config) Validate() error {
 	if c == nil {
@@ -66,7 +103,10 @@ func (c *Config) Validate() error {
 	}
 
 	seenNames := make(map[string]struct{}, len(c.Accounts))
-	for _, account := range c.Accounts {
+	for i, account := range c.Accounts {
+		if strings.TrimSpace(account.Name) == "" {
+			return fmt.Errorf("account %d: %w", i, ErrEmptyAccountName)
+		}
 		if _, exists := seenNames[account.Name]; exists {
 			return fmt.Errorf("%w: %q", ErrDuplicateAccountName, account.Name)
 		}

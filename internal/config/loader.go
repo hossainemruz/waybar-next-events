@@ -111,13 +111,15 @@ func (l *Loader) Save(cfg *Config) error {
 		return errors.New("cannot save nil config")
 	}
 
-	if err := cfg.Validate(); err != nil {
+	toSave := cfg.Clone()
+
+	if err := toSave.Validate(); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	cfg.Normalize()
+	toSave.Normalize()
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.MarshalIndent(toSave, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
