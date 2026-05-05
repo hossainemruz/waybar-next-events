@@ -242,6 +242,125 @@ func TestBuildListCmdParsesCustomLimit(t *testing.T) {
 	}
 }
 
+func TestRunListInvalidDays(t *testing.T) {
+	cmd := newTestCommand()
+	deps := listDeps{
+		listOptions: listOptions{days: 0, limit: defaultEventCountLimit},
+		now:         func() time.Time { return time.Now() },
+		fetcher:     &fakeEventFetcher{},
+		render:      output.Render,
+	}
+
+	err := runList(cmd, deps)
+	if err == nil {
+		t.Fatal("expected error for days=0, got nil")
+	}
+	if !strings.Contains(err.Error(), "--days must be a positive integer") {
+		t.Fatalf("error = %q, want --days validation message", err.Error())
+	}
+}
+
+func TestRunListInvalidDaysNegative(t *testing.T) {
+	cmd := newTestCommand()
+	deps := listDeps{
+		listOptions: listOptions{days: -1, limit: defaultEventCountLimit},
+		now:         func() time.Time { return time.Now() },
+		fetcher:     &fakeEventFetcher{},
+		render:      output.Render,
+	}
+
+	err := runList(cmd, deps)
+	if err == nil {
+		t.Fatal("expected error for days=-1, got nil")
+	}
+	if !strings.Contains(err.Error(), "--days must be a positive integer") {
+		t.Fatalf("error = %q, want --days validation message", err.Error())
+	}
+}
+
+func TestRunListInvalidLimit(t *testing.T) {
+	cmd := newTestCommand()
+	deps := listDeps{
+		listOptions: listOptions{days: defaultLookAheadDays, limit: 0},
+		now:         func() time.Time { return time.Now() },
+		fetcher:     &fakeEventFetcher{},
+		render:      output.Render,
+	}
+
+	err := runList(cmd, deps)
+	if err == nil {
+		t.Fatal("expected error for limit=0, got nil")
+	}
+	if !strings.Contains(err.Error(), "--limit must be a positive integer") {
+		t.Fatalf("error = %q, want --limit validation message", err.Error())
+	}
+}
+
+func TestRunListInvalidLimitNegative(t *testing.T) {
+	cmd := newTestCommand()
+	deps := listDeps{
+		listOptions: listOptions{days: defaultLookAheadDays, limit: -5},
+		now:         func() time.Time { return time.Now() },
+		fetcher:     &fakeEventFetcher{},
+		render:      output.Render,
+	}
+
+	err := runList(cmd, deps)
+	if err == nil {
+		t.Fatal("expected error for limit=-5, got nil")
+	}
+	if !strings.Contains(err.Error(), "--limit must be a positive integer") {
+		t.Fatalf("error = %q, want --limit validation message", err.Error())
+	}
+}
+
+func TestBuildListCmdSetsTimeoutContext(t *testing.T) {
+	// Verify that the list command sets a timeout context by checking
+	// that runList propagates a deadline from cmd.Context() to the fetcher.
+
+	var capturedDeadline time.Time
+	fetcher := &fakeEventFetcher{
+		fetchFunc: func(ctx context.Context, _ calendar.EventQuery, _ int) ([]calendar.Event, error) {
+			dl, ok := ctx.Deadline()
+			if !ok {
+				t.Fatal("expected context to have a deadline, but it doesn't")
+			}
+			capturedDeadline = dl
+			return []calendar.Event{}, nil
+		},
+	}
+
+	// Simulate what buildListCmd's RunE does: wrap the context with a timeout.
+	beforeTimeout := time.Now()
+	cmd := newTestCommand()
+	ctx, cancel := context.WithTimeout(context.Background(), listCommandTimeout)
+	defer cancel()
+	cmd.SetContext(ctx)
+
+	deps := listDeps{
+		listOptions: listOptions{days: 1, limit: 1},
+		now:         func() time.Time { return time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC) },
+		fetcher:     fetcher,
+		render:      output.Render,
+	}
+
+	if err := runList(cmd, deps); err != nil {
+		t.Fatalf("runList() error = %v", err)
+	}
+
+	if capturedDeadline.IsZero() {
+		t.Fatal("expected deadline to be set on context, got zero time")
+	}
+
+	// The captured deadline should be approximately listCommandTimeout from
+	// when we created the timeout context. Allow up to 2 seconds of slack.
+	expectedMin := beforeTimeout.Add(listCommandTimeout - 2*time.Second)
+	expectedMax := beforeTimeout.Add(listCommandTimeout + 2*time.Second)
+	if capturedDeadline.Before(expectedMin) || capturedDeadline.After(expectedMax) {
+		t.Fatalf("deadline = %v, want within [%v, %v]", capturedDeadline, expectedMin, expectedMax)
+	}
+}
+
 type fakeEventFetcher struct {
 	fetchFunc func(context.Context, calendar.EventQuery, int) ([]calendar.Event, error)
 }

@@ -48,11 +48,16 @@ func NewLoaderWithPath(path string) *Loader {
 }
 
 // DefaultConfigPath returns the default configuration file path.
-// It resolves to $HOME/.config/waybar-next-events/config.json.
+// It respects the XDG_CONFIG_HOME environment variable: if set, the config
+// file is resolved relative to that directory. Otherwise it falls back to
+// $HOME/.config/waybar-next-events/config.json.
 func DefaultConfigPath() string {
+	if xdgDir := os.Getenv("XDG_CONFIG_HOME"); xdgDir != "" {
+		return filepath.Join(xdgDir, ConfigDirName, ConfigFileName)
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		// Fallback to current directory if home cannot be determined
 		return filepath.Join(".", ConfigDirName, ConfigFileName)
 	}
 	return filepath.Join(homeDir, ".config", ConfigDirName, ConfigFileName)
