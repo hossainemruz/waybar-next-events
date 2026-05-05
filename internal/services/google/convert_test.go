@@ -162,6 +162,24 @@ func Test_parseEventTime(t *testing.T) {
 			wantStart: time.Date(2025, 6, 15, 10, 0, 0, 0, time.FixedZone("", -5*3600)),
 			wantEnd:   time.Date(2025, 6, 15, 11, 0, 0, 0, time.FixedZone("", -5*3600)),
 		},
+		{
+			name: "DateTime with fractional seconds (RFC3339Nano)",
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00.123Z"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:30:00.456Z"},
+			},
+			wantStart: time.Date(2025, 6, 15, 10, 0, 0, 123000000, time.UTC),
+			wantEnd:   time.Date(2025, 6, 15, 11, 30, 0, 456000000, time.UTC),
+		},
+		{
+			name: "DateTime with fractional seconds and timezone offset",
+			event: googlecalendar.Event{
+				Start: &googlecalendar.EventDateTime{DateTime: "2025-06-15T10:00:00.999+02:00"},
+				End:   &googlecalendar.EventDateTime{DateTime: "2025-06-15T11:00:00.500+02:00"},
+			},
+			wantStart: time.Date(2025, 6, 15, 10, 0, 0, 999000000, time.FixedZone("", 2*3600)),
+			wantEnd:   time.Date(2025, 6, 15, 11, 0, 0, 500000000, time.FixedZone("", 2*3600)),
+		},
 	}
 
 	for _, tt := range tests {
@@ -561,5 +579,73 @@ func Test_convertGoogleCalendarEvents_nonLocalTimezone(t *testing.T) {
 		if !got[i].End.Equal(want[i].End) {
 			t.Errorf("event[%d] end mismatch:\n  got:  %v\n  want: %v", i, got[i].End, want[i].End)
 		}
+	}
+}
+
+func Test_parseRFC3339(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    time.Time
+		wantErr bool
+	}{
+		{
+			name:  "RFC3339 without fractional seconds",
+			input: "2025-06-15T10:00:00Z",
+			want:  time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "RFC3339 with timezone offset",
+			input: "2025-06-15T10:00:00+02:00",
+			want:  time.Date(2025, 6, 15, 10, 0, 0, 0, time.FixedZone("", 2*3600)),
+		},
+		{
+			name:  "RFC3339Nano with millisecond precision",
+			input: "2025-06-15T10:00:00.123Z",
+			want:  time.Date(2025, 6, 15, 10, 0, 0, 123000000, time.UTC),
+		},
+		{
+			name:  "RFC3339Nano with microsecond precision",
+			input: "2025-06-15T10:00:00.123456Z",
+			want:  time.Date(2025, 6, 15, 10, 0, 0, 123456000, time.UTC),
+		},
+		{
+			name:  "RFC3339Nano with nanosecond precision",
+			input: "2025-06-15T10:00:00.123456789Z",
+			want:  time.Date(2025, 6, 15, 10, 0, 0, 123456789, time.UTC),
+		},
+		{
+			name:  "RFC3339Nano with timezone offset",
+			input: "2025-06-15T10:00:00.500+05:30",
+			want:  time.Date(2025, 6, 15, 10, 0, 0, 500000000, time.FixedZone("", 5*3600+30*60)),
+		},
+		{
+			name:    "invalid timestamp",
+			input:   "not-a-timestamp",
+			wantErr: true,
+		},
+		{
+			name:    "empty string",
+			input:   "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseRFC3339(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got time %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !got.Equal(tt.want) {
+				t.Errorf("mismatch:\n  got:  %v\n  want: %v", got, tt.want)
+			}
+		})
 	}
 }

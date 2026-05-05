@@ -31,25 +31,42 @@ func (s *Service) FetchEvents(ctx context.Context, account calendar.Account, que
 	events := make([]calendar.Event, 0)
 	ids, fallback := calendarIDs(account)
 	for _, calendarID := range ids {
-		// MaxResults(2500) makes the page size explicit. Pagination via
-		// nextPageToken is intentionally omitted because the query window
-		// (DayLimit) keeps result sets well below this limit in practice.
-		response, err := srv.Events.List(calendarID).
-			ShowDeleted(false).
-			SingleEvents(true).
-			TimeMin(minDay.Format(time.RFC3339)).
-			TimeMax(maxDay.Format(time.RFC3339)).
-			OrderBy("startTime").
-			MaxResults(2500).
-			Do()
-		if err != nil {
-			if fallback {
-				return nil, fmt.Errorf("no calendars selected for account %q and failed to fetch from the default primary calendar: %w", account.Name, err)
+		var allItems []*googlecalendar.Event
+		pageToken := ""
+		for {
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
-			return nil, fmt.Errorf("fetch events for calendar %q from account %q: %w", calendarID, account.Name, err)
+
+			call := srv.Events.List(calendarID).
+				ShowDeleted(false).
+				SingleEvents(true).
+				TimeMin(minDay.Format(time.RFC3339)).
+				TimeMax(maxDay.Format(time.RFC3339)).
+				OrderBy("startTime").
+				TimeZone(loc.String()).
+				MaxResults(2500)
+			if pageToken != "" {
+				call.PageToken(pageToken)
+			}
+
+			response, err := call.Do()
+			if err != nil {
+				if fallback {
+					return nil, fmt.Errorf("no calendars selected for account %q and failed to fetch from the default primary calendar: %w", account.Name, err)
+				}
+				return nil, fmt.Errorf("fetch events for calendar %q from account %q: %w", calendarID, account.Name, err)
+			}
+
+			allItems = append(allItems, response.Items...)
+
+			if response.NextPageToken == "" {
+				break
+			}
+			pageToken = response.NextPageToken
 		}
 
-		converted, err := convertGoogleEvents(response.Items, query.DayLimit, query.Now)
+		converted, err := convertGoogleEvents(allItems, query.DayLimit, query.Now)
 		if err != nil {
 			return nil, err
 		}
