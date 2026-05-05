@@ -45,9 +45,6 @@ func buildAccountDeleteCmd(deps *AppDeps) *cobra.Command {
 
 func runAccountDelete(cmd *cobra.Command, deps accountDeleteDeps) error {
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	accounts, err := deps.manager.ListAccounts()
 	if err != nil {

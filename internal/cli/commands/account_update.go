@@ -53,9 +53,6 @@ func buildAccountUpdateCmd(deps *AppDeps) *cobra.Command {
 
 func runAccountUpdate(cmd *cobra.Command, deps accountUpdateDeps) error {
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	accounts, err := deps.manager.ListAccounts()
 	if err != nil {

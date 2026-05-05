@@ -347,3 +347,29 @@ func TestLoaderRestoreSnapshotUsesRestrictedPermissions(t *testing.T) {
 		t.Fatalf("file mode = %o, want %o", got, ConfigFilePermission)
 	}
 }
+
+func TestDefaultConfigPathRespectsXDGConfigHome(t *testing.T) {
+	xdgDir := "/tmp/xdg-test-config"
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+
+	got := DefaultConfigPath()
+	want := filepath.Join(xdgDir, ConfigDirName, ConfigFileName)
+	if got != want {
+		t.Fatalf("DefaultConfigPath() = %q, want %q when XDG_CONFIG_HOME=%q", got, want, xdgDir)
+	}
+}
+
+func TestDefaultConfigPathWithoutXDGConfigHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+
+	got := DefaultConfigPath()
+	want := filepath.Join(homeDir, ".config", ConfigDirName, ConfigFileName)
+	if got != want {
+		t.Fatalf("DefaultConfigPath() = %q, want %q", got, want)
+	}
+}

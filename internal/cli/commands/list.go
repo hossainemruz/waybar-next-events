@@ -16,6 +16,7 @@ import (
 const (
 	defaultLookAheadDays   = 4
 	defaultEventCountLimit = 10
+	listCommandTimeout     = 30 * time.Second
 )
 
 type listEventFetcher interface {
@@ -45,6 +46,10 @@ func buildListCmd(deps *AppDeps) *cobra.Command {
 		Short: "Print upcoming calendar events",
 		Long:  "Retrieve and display upcoming calendar events. Use --limit to control how many events are shown and --days to set the look-ahead window.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, cancel := context.WithTimeout(cmd.Context(), listCommandTimeout)
+			defer cancel()
+			cmd.SetContext(ctx)
+
 			return runList(cmd, listDeps{
 				listOptions: opts,
 				now:         time.Now,
@@ -60,11 +65,14 @@ func buildListCmd(deps *AppDeps) *cobra.Command {
 }
 
 func runList(cmd *cobra.Command, deps listDeps) error {
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-		cmd.SetContext(ctx)
+	if deps.days <= 0 {
+		return fmt.Errorf("--days must be a positive integer, got %d", deps.days)
 	}
+	if deps.limit <= 0 {
+		return fmt.Errorf("--limit must be a positive integer, got %d", deps.limit)
+	}
+
+	ctx := cmd.Context()
 
 	now := deps.now()
 	events, err := deps.fetcher.Fetch(ctx, calendar.EventQuery{Now: now, DayLimit: deps.days}, deps.limit)

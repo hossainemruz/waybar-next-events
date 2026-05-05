@@ -48,9 +48,6 @@ func buildAccountAddCmd(deps *AppDeps) *cobra.Command {
 
 func runAccountAdd(cmd *cobra.Command, deps accountAddDeps) error {
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	appServices := deps.registry.All()
 	calendarServices := make([]calendar.Service, len(appServices))

@@ -44,9 +44,6 @@ func buildAccountLoginCmd(deps *AppDeps) *cobra.Command {
 
 func runAccountLogin(cmd *cobra.Command, deps accountLoginDeps) error {
 	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 
 	accounts, err := deps.manager.ListAccounts()
 	if err != nil {

@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -30,5 +32,23 @@ func TestRootCommandRegistration(t *testing.T) {
 		if command == nil {
 			t.Fatalf("root.Find(%q) returned nil command", commandName)
 		}
+	}
+}
+
+func TestRootCommandVersionFlag(t *testing.T) {
+	root := BuildRoot(&AppDeps{})
+
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetArgs([]string{"--version"})
+
+	err := root.Execute()
+	if err != nil {
+		t.Fatalf("root.Execute() error = %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, Version) {
+		t.Fatalf("version output = %q, want it to contain %q", output, Version)
 	}
 }
