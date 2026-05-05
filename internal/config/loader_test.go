@@ -94,8 +94,19 @@ func TestLoaderSaveGeneratesMissingAccountIDs(t *testing.T) {
 	if err := loader.Save(cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
-	if cfg.Accounts[0].ID == "" {
-		t.Fatal("Save() did not generate account ID")
+
+	// Save must not mutate the caller's config.
+	if cfg.Accounts[0].ID != "" {
+		t.Fatal("Save() mutated caller config by generating an ID")
+	}
+
+	// The saved file must contain the generated ID.
+	loaded, err := loader.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if loaded.Accounts[0].ID == "" {
+		t.Fatal("Save() did not generate account ID in saved file")
 	}
 }
 
@@ -237,6 +248,76 @@ func TestLoaderSaveUsesRestrictedPermissions(t *testing.T) {
 	}
 	if got := fileInfo.Mode().Perm(); got != ConfigFilePermission {
 		t.Fatalf("file mode = %o, want %o", got, ConfigFilePermission)
+	}
+}
+
+func TestLoaderSaveDoesNotMutateCallerConfig(t *testing.T) {
+	loader := NewLoaderWithPath(filepath.Join(t.TempDir(), "config.json"))
+
+	cfg := &Config{
+		Accounts: []Account{
+			{
+				ID:      "acct-b",
+				Service: calendar.ServiceTypeGoogle,
+				Name:    "Personal",
+				Settings: map[string]string{
+					"client_id": "personal-client",
+				},
+				Calendars: []CalendarRef{{ID: "home", Name: "Home"}},
+			},
+			{
+				ID:        "acct-a",
+				Service:   calendar.ServiceTypeGoogle,
+				Name:      "Work",
+				Settings:  nil,
+				Calendars: nil,
+			},
+		},
+	}
+
+	// Capture pre-save state via independent manual construction (not Clone()).
+	preSave := &Config{
+		Accounts: []Account{
+			{
+				ID:      "acct-b",
+				Service: calendar.ServiceTypeGoogle,
+				Name:    "Personal",
+				Settings: map[string]string{
+					"client_id": "personal-client",
+				},
+				Calendars: []CalendarRef{{ID: "home", Name: "Home"}},
+			},
+			{
+				ID:        "acct-a",
+				Service:   calendar.ServiceTypeGoogle,
+				Name:      "Work",
+				Settings:  nil,
+				Calendars: nil,
+			},
+		},
+	}
+
+	if err := loader.Save(cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Assert that the caller's config pointer was not mutated.
+	if len(cfg.Accounts) != len(preSave.Accounts) {
+		t.Fatalf("Save() mutated caller config: len(Accounts) changed from %d to %d", len(preSave.Accounts), len(cfg.Accounts))
+	}
+	for i := range cfg.Accounts {
+		if cfg.Accounts[i].ID != preSave.Accounts[i].ID {
+			t.Fatalf("Save() mutated caller config: Accounts[%d].ID changed from %q to %q", i, preSave.Accounts[i].ID, cfg.Accounts[i].ID)
+		}
+		if cfg.Accounts[i].Name != preSave.Accounts[i].Name {
+			t.Fatalf("Save() mutated caller config: Accounts[%d].Name changed from %q to %q", i, preSave.Accounts[i].Name, cfg.Accounts[i].Name)
+		}
+		if (cfg.Accounts[i].Settings == nil) != (preSave.Accounts[i].Settings == nil) {
+			t.Fatalf("Save() mutated caller config: Accounts[%d].Settings nil-ness changed", i)
+		}
+		if (cfg.Accounts[i].Calendars == nil) != (preSave.Accounts[i].Calendars == nil) {
+			t.Fatalf("Save() mutated caller config: Accounts[%d].Calendars nil-ness changed", i)
+		}
 	}
 }
 

@@ -13,6 +13,8 @@ var (
 	ErrDuplicateAccountName = errors.New("account name already exists")
 	// ErrDuplicateAccountID indicates that two accounts share the same stable ID.
 	ErrDuplicateAccountID = errors.New("account id already exists")
+	// ErrEmptyAccountName indicates that an account name is empty or whitespace-only.
+	ErrEmptyAccountName = errors.New("account name cannot be empty")
 )
 
 // ErrConfigNotFound is returned when the config file does not exist.

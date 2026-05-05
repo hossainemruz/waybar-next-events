@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/hossainemruz/waybar-next-events/internal/calendar"
@@ -23,6 +24,57 @@ func TestNewAccountID(t *testing.T) {
 	if id1 == id2 {
 		t.Fatal("NewAccountID() returned duplicate IDs")
 	}
+}
+
+func TestCloneDeepCopy(t *testing.T) {
+	cfg := &Config{Accounts: []calendar.Account{
+		{
+			ID:      "a",
+			Service: calendar.ServiceTypeGoogle,
+			Name:    "Work",
+			Settings: map[string]string{
+				"client_id": "client",
+			},
+			Calendars: []calendar.CalendarRef{{ID: "primary", Name: "Primary"}},
+		},
+		{
+			ID:        "b",
+			Service:   calendar.ServiceType("outlook"),
+			Name:      "Mail",
+			Settings:  nil,
+			Calendars: nil,
+		},
+	}}
+
+	cloned := cfg.Clone()
+
+	if cloned == cfg {
+		t.Fatal("Clone() returned the same pointer")
+	}
+
+	if !reflect.DeepEqual(cfg, cloned) {
+		t.Fatalf("Clone() did not produce an equal copy:\noriginal: %+v\ncloned:   %+v", cfg, cloned)
+	}
+
+	// Mutate clone and verify original is unaffected.
+	cloned.Accounts[0].Name = "Mutated"
+	cloned.Accounts[0].Settings["client_id"] = "mutated"
+	cloned.Accounts[0].Calendars[0].Name = "Mutated"
+	if cfg.Accounts[0].Name != "Work" {
+		t.Fatalf("Clone() shallow-copied Name: original = %q", cfg.Accounts[0].Name)
+	}
+	if cfg.Accounts[0].Settings["client_id"] != "client" {
+		t.Fatalf("Clone() shallow-copied Settings: original = %q", cfg.Accounts[0].Settings["client_id"])
+	}
+	if cfg.Accounts[0].Calendars[0].Name != "Primary" {
+		t.Fatalf("Clone() shallow-copied Calendars: original = %q", cfg.Accounts[0].Calendars[0].Name)
+	}
+}
+
+func TestNormalizeNilReceiver(t *testing.T) {
+	var nilCfg *Config
+	// Should not panic.
+	nilCfg.Normalize()
 }
 
 func TestConfigNormalize(t *testing.T) {
@@ -78,6 +130,20 @@ func TestConfigValidate(t *testing.T) {
 	}}
 	if err := duplicateID.Validate(); !errors.Is(err, ErrDuplicateAccountID) {
 		t.Fatalf("Validate() error = %v, want ErrDuplicateAccountID", err)
+	}
+
+	emptyName := &Config{Accounts: []calendar.Account{
+		{ID: "a", Name: ""},
+	}}
+	if err := emptyName.Validate(); !errors.Is(err, ErrEmptyAccountName) {
+		t.Fatalf("Validate() error = %v, want ErrEmptyAccountName", err)
+	}
+
+	whitespaceName := &Config{Accounts: []calendar.Account{
+		{ID: "a", Name: "   "},
+	}}
+	if err := whitespaceName.Validate(); !errors.Is(err, ErrEmptyAccountName) {
+		t.Fatalf("Validate() error = %v, want ErrEmptyAccountName", err)
 	}
 }
 
