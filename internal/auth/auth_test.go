@@ -1,12 +1,16 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -440,5 +444,205 @@ func TestAuthenticator_TokenRefresh(t *testing.T) {
 		if token.AccessToken != "new-access-token" {
 			t.Errorf("Refreshed token = %s, want new-access-token", token.AccessToken)
 		}
+	}
+}
+
+func TestAuthenticator_InvalidGrantClearsStore(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error": "invalid_grant", "error_description": "Token has been revoked"}`))
+		}
+	}))
+	defer mockServer.Close()
+
+	store := tokenstore.NewInMemoryTokenStore()
+	auth := NewAuthenticator(store)
+
+	expiredToken := &oauth2.Token{
+		AccessToken:  "old-access-token",
+		RefreshToken: "old-refresh-token",
+		TokenType:    "Bearer",
+		Expiry:       time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	provider := &mockProvider{
+		name:        "test",
+		clientID:    "client-id",
+		authURL:     mockServer.URL + "/auth",
+		tokenURL:    mockServer.URL + "/token",
+		redirectURL: config.DefaultCallbackURL,
+		scopes:      []string{"read"},
+	}
+
+	ctx := context.Background()
+	if err := store.Set(ctx, provider.Name(), expiredToken); err != nil {
+		t.Fatalf("store.Set() error = %v", err)
+	}
+
+	_, err := auth.Authenticate(ctx, provider)
+	if !errors.Is(err, ErrReauthRequired) {
+		t.Fatalf("Authenticate() error = %v, want ErrReauthRequired", err)
+	}
+
+	_, found, _ := store.Get(ctx, provider.Name())
+	if found {
+		t.Fatal("expected token to be cleared after invalid_grant")
+	}
+}
+
+func TestAuthenticator_TransientErrorDoesNotClearStore(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error": "temporarily_unavailable", "error_description": "Service is down"}`))
+		}
+	}))
+	defer mockServer.Close()
+
+	store := tokenstore.NewInMemoryTokenStore()
+	auth := NewAuthenticator(store)
+
+	expiredToken := &oauth2.Token{
+		AccessToken:  "old-access-token",
+		RefreshToken: "old-refresh-token",
+		TokenType:    "Bearer",
+		Expiry:       time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	provider := &mockProvider{
+		name:        "test",
+		clientID:    "client-id",
+		authURL:     mockServer.URL + "/auth",
+		tokenURL:    mockServer.URL + "/token",
+		redirectURL: config.DefaultCallbackURL,
+		scopes:      []string{"read"},
+	}
+
+	ctx := context.Background()
+	if err := store.Set(ctx, provider.Name(), expiredToken); err != nil {
+		t.Fatalf("store.Set() error = %v", err)
+	}
+
+	_, err := auth.Authenticate(ctx, provider)
+	if err == nil {
+		t.Fatal("Authenticate() error = nil, want error")
+	}
+	if errors.Is(err, ErrReauthRequired) {
+		t.Fatal("Authenticate() error = ErrReauthRequired, want transient error")
+	}
+
+	stored, found, _ := store.Get(ctx, provider.Name())
+	if !found {
+		t.Fatal("expected token to be preserved after transient error")
+	}
+	if stored.RefreshToken != expiredToken.RefreshToken {
+		t.Fatalf("stored refresh token = %q, want %q", stored.RefreshToken, expiredToken.RefreshToken)
+	}
+}
+
+func TestDefaultBrowserOpener_Fallback(t *testing.T) {
+	// Ensure xdg-open is not found by using an empty PATH.
+	oldPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", "/nonexistent"); err != nil {
+		t.Fatalf("failed to set PATH: %v", err)
+	}
+	defer func() {
+		if err := os.Setenv("PATH", oldPath); err != nil {
+			t.Fatalf("failed to restore PATH: %v", err)
+		}
+	}()
+
+	oldStdout := os.Stdout
+	r, w, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatalf("failed to create pipe: %v", pipeErr)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = oldStdout
+	}()
+
+	testURL := "http://example.com/auth"
+	err := defaultBrowserOpener(testURL)
+
+	if closeErr := w.Close(); closeErr != nil {
+		t.Fatalf("failed to close pipe: %v", closeErr)
+	}
+
+	if err != nil {
+		t.Fatalf("defaultBrowserOpener() error = %v, want nil", err)
+	}
+
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	output := buf.String()
+	if !strings.Contains(output, testURL) {
+		t.Fatalf("expected stdout to contain URL %q, got %q", testURL, output)
+	}
+}
+
+func TestIsTerminalAuthError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "invalid_grant",
+			err:  &oauth2.RetrieveError{ErrorCode: "invalid_grant"},
+			want: true,
+		},
+		{
+			name: "invalid_request",
+			err:  &oauth2.RetrieveError{ErrorCode: "invalid_request"},
+			want: true,
+		},
+		{
+			name: "invalid_client",
+			err:  &oauth2.RetrieveError{ErrorCode: "invalid_client"},
+			want: true,
+		},
+		{
+			name: "temporarily_unavailable",
+			err:  &oauth2.RetrieveError{ErrorCode: "temporarily_unavailable"},
+			want: false,
+		},
+		{
+			name: "wrapped_invalid_grant",
+			err:  fmt.Errorf("token refresh failed: %w", &oauth2.RetrieveError{ErrorCode: "invalid_grant"}),
+			want: true,
+		},
+		{
+			name: "wrapped_transient",
+			err:  fmt.Errorf("token refresh failed: %w", &oauth2.RetrieveError{ErrorCode: "server_error"}),
+			want: false,
+		},
+		{
+			name: "context_deadline_exceeded",
+			err:  context.DeadlineExceeded,
+			want: false,
+		},
+		{
+			name: "plain_error",
+			err:  errors.New("some network error"),
+			want: false,
+		},
+		{
+			name: "nil_error",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTerminalAuthError(tt.err)
+			if got != tt.want {
+				t.Errorf("isTerminalAuthError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
