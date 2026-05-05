@@ -197,6 +197,65 @@ func TestRenderDeterministicOrdering(t *testing.T) {
 	}
 }
 
+func TestGroupEventsByDaySpansMultipleWeeks(t *testing.T) {
+	// Thursday Jan 15, 2026 — events span two different Mondays
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	monday1 := time.Date(2026, 1, 19, 10, 0, 0, 0, time.UTC) // Jan 19 Monday
+	monday2 := time.Date(2026, 1, 26, 14, 0, 0, 0, time.UTC) // Jan 26 Monday
+
+	events := []calendar.Event{
+		{Title: "Week1 Standup", Start: monday1, End: monday1.Add(time.Hour)},
+		{Title: "Week2 Standup", Start: monday2, End: monday2.Add(time.Hour)},
+	}
+
+	groups := groupEventsByDay(events, now)
+
+	if len(groups) != 2 {
+		t.Fatalf("expected 2 groups (one per Monday), got %d", len(groups))
+	}
+	if groups[0].Day != "Monday" {
+		t.Fatalf("first group Day = %q, want Monday", groups[0].Day)
+	}
+	if groups[1].Day != "Monday" {
+		t.Fatalf("second group Day = %q, want Monday", groups[1].Day)
+	}
+	if len(groups[0].Events) != 1 || groups[0].Events[0].Title != "Week1 Standup" {
+		t.Fatalf("first group events = %v, want Week1 Standup", groups[0].Events)
+	}
+	if len(groups[1].Events) != 1 || groups[1].Events[0].Title != "Week2 Standup" {
+		t.Fatalf("second group events = %v, want Week2 Standup", groups[1].Events)
+	}
+
+	// Verify the two groups also appear separately in the rendered tooltip
+	payload := mustRender(t, events, now)
+	// There should be two "Monday" headers in the tooltip
+	mondayCount := strings.Count(payload.Tooltip, "<b>Monday</b>")
+	if mondayCount != 2 {
+		t.Fatalf("expected 2 Monday groups in tooltip, got %d; tooltip:\n%s", mondayCount, payload.Tooltip)
+	}
+}
+
+func TestGroupEventsByDayReturnsEmptySlice(t *testing.T) {
+	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+
+	result := groupEventsByDay(nil, now)
+	if result == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected empty slice, got %d groups", len(result))
+	}
+
+	// Also test with empty (non-nil) events slice
+	result = groupEventsByDay([]calendar.Event{}, now)
+	if result == nil {
+		t.Fatal("expected non-nil empty slice, got nil")
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected empty slice, got %d groups", len(result))
+	}
+}
+
 func TestRenderFormatDuration(t *testing.T) {
 	cases := []struct {
 		d    time.Duration

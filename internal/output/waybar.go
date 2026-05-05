@@ -118,7 +118,9 @@ func formatDuration(d time.Duration) string {
 }
 
 // groupEventsByDay groups pre-sorted events by calendar day.
-// Day labels: "Today", "Tomorrow", then weekday name (e.g. "Monday").
+// Events are grouped by actual date so that events on different weeks are
+// never collapsed into the same group. Day labels: "Today", "Tomorrow", then
+// the weekday name (e.g. "Monday").
 func groupEventsByDay(events []calendar.Event, now time.Time) []calendar.EventsGroup {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	tomorrow := today.AddDate(0, 0, 1)
@@ -128,6 +130,7 @@ func groupEventsByDay(events []calendar.Event, now time.Time) []calendar.EventsG
 
 	for _, e := range events {
 		eventDay := time.Date(e.Start.Year(), e.Start.Month(), e.Start.Day(), 0, 0, 0, 0, e.Start.Location())
+		dateKey := eventDay.Format("2006-01-02")
 
 		var label string
 		switch {
@@ -139,17 +142,17 @@ func groupEventsByDay(events []calendar.Event, now time.Time) []calendar.EventsG
 			label = eventDay.Weekday().String()
 		}
 
-		if _, exists := grouped[label]; !exists {
-			grouped[label] = &calendar.EventsGroup{Day: label}
-			dayOrder = append(dayOrder, label)
+		if _, exists := grouped[dateKey]; !exists {
+			grouped[dateKey] = &calendar.EventsGroup{Day: label}
+			dayOrder = append(dayOrder, dateKey)
 		}
-		g := grouped[label]
+		g := grouped[dateKey]
 		g.Events = append(g.Events, e)
 	}
 
-	var result []calendar.EventsGroup
-	for _, label := range dayOrder {
-		result = append(result, *grouped[label])
+	result := make([]calendar.EventsGroup, 0, len(dayOrder))
+	for _, key := range dayOrder {
+		result = append(result, *grouped[key])
 	}
 	return result
 }
