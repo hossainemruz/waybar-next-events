@@ -521,12 +521,17 @@ type stubAppService struct {
 	providerErr         error
 	discoverErr         error
 	fetchErr            error
+	fetchErrs           map[string]error // per-account fetch errors, keyed by account.ID
+	providerErrs        map[string]error // per-account provider errors, keyed by account.ID
 }
 
 func (s *stubAppService) Type() calendar.ServiceType             { return s.serviceType }
 func (s *stubAppService) DisplayName() string                    { return string(s.serviceType) }
 func (s *stubAppService) AccountFields() []calendar.AccountField { return s.fields }
 func (s *stubAppService) Provider(_ context.Context, account calendar.Account, _ secrets.Store) (providers.Provider, error) {
+	if err, ok := s.providerErrs[account.ID]; ok {
+		return nil, err
+	}
 	if s.providerErr != nil {
 		return nil, s.providerErr
 	}
@@ -538,7 +543,10 @@ func (s *stubAppService) DiscoverCalendars(context.Context, calendar.Account, *h
 	}
 	return s.discoveredCalendars, nil
 }
-func (s *stubAppService) FetchEvents(context.Context, calendar.Account, calendar.EventQuery, *http.Client) ([]calendar.Event, error) {
+func (s *stubAppService) FetchEvents(_ context.Context, account calendar.Account, _ calendar.EventQuery, _ *http.Client) ([]calendar.Event, error) {
+	if err, ok := s.fetchErrs[account.ID]; ok {
+		return nil, err
+	}
 	if s.fetchErr != nil {
 		return nil, s.fetchErr
 	}

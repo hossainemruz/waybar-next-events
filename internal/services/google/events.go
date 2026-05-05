@@ -3,6 +3,7 @@ package google
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -30,6 +31,9 @@ func (s *Service) FetchEvents(ctx context.Context, account calendar.Account, que
 
 	events := make([]calendar.Event, 0)
 	ids, fallback := calendarIDs(account)
+	if fallback {
+		slog.Warn("no calendars selected for account, falling back to primary", "account", account.Name)
+	}
 	for _, calendarID := range ids {
 		var allItems []*googlecalendar.Event
 		pageToken := ""

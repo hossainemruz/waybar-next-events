@@ -1,8 +1,10 @@
 package google
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -287,6 +289,75 @@ func TestService_FetchEvents(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "context canceled") && !strings.Contains(err.Error(), "context deadline") {
 			t.Errorf("expected context-related error, got: %v", err)
+		}
+	})
+
+	t.Run("logs warning when falling back to primary calendar", func(t *testing.T) {
+		body := `{"items": []}`
+		client := &http.Client{
+			Transport: &mockEventsTransport{body: body, statusCode: http.StatusOK},
+		}
+
+		account := calendar.Account{
+			ID:   "acc-1",
+			Name: "TestUser",
+			// No calendars selected — triggers fallback to "primary"
+		}
+		query := calendar.EventQuery{
+			Now:      time.Date(2025, 6, 15, 0, 0, 0, 0, loc),
+			DayLimit: 4,
+		}
+
+		// Capture slog output.
+		var buf bytes.Buffer
+		originalDefault := slog.Default()
+		defer slog.SetDefault(originalDefault)
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+		_, err := srv.FetchEvents(ctx, account, query, client)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		logOutput := buf.String()
+		if !strings.Contains(logOutput, "falling back to primary") {
+			t.Errorf("expected warning log about falling back to primary, got log output:\n%s", logOutput)
+		}
+		if !strings.Contains(logOutput, "TestUser") {
+			t.Errorf("expected warning log to include account name TestUser, got log output:\n%s", logOutput)
+		}
+	})
+
+	t.Run("does not log warning when calendars are explicitly selected", func(t *testing.T) {
+		body := `{"items": []}`
+		client := &http.Client{
+			Transport: &mockEventsTransport{body: body, statusCode: http.StatusOK},
+		}
+
+		account := calendar.Account{
+			ID:        "acc-1",
+			Name:      "TestUser",
+			Calendars: []calendar.CalendarRef{{ID: "work", Name: "Work"}},
+		}
+		query := calendar.EventQuery{
+			Now:      time.Date(2025, 6, 15, 0, 0, 0, 0, loc),
+			DayLimit: 4,
+		}
+
+		// Capture slog output.
+		var buf bytes.Buffer
+		originalDefault := slog.Default()
+		defer slog.SetDefault(originalDefault)
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+		_, err := srv.FetchEvents(ctx, account, query, client)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		logOutput := buf.String()
+		if strings.Contains(logOutput, "falling back to primary") {
+			t.Errorf("did not expect warning log about falling back to primary, but got:\n%s", logOutput)
 		}
 	})
 }

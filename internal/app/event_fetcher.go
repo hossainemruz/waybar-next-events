@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/hossainemruz/waybar-next-events/internal/auth"
@@ -44,8 +46,9 @@ func (f *EventFetcher) Fetch(ctx context.Context, query calendar.EventQuery, lim
 
 	authenticator := f.newAuthenticator()
 	events := make([]calendar.Event, 0)
+	var errs []error
+	successCount := 0
 
-	// Fetch is fail-fast: one errored account stops processing for all accounts.
 	for _, account := range cfg.Accounts {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -53,25 +56,38 @@ func (f *EventFetcher) Fetch(ctx context.Context, query calendar.EventQuery, lim
 
 		service, err := f.services.Service(account.Service)
 		if err != nil {
-			return nil, err
+			slog.Error("failed to resolve service for account", "account", account.Name, "error", err)
+			errs = append(errs, fmt.Errorf("account %q: %w", account.Name, err))
+			continue
 		}
 
 		provider, err := service.Provider(ctx, account, f.secretStore)
 		if err != nil {
-			return nil, err
+			slog.Error("failed to create provider for account", "account", account.Name, "error", err)
+			errs = append(errs, fmt.Errorf("account %q: %w", account.Name, err))
+			continue
 		}
 
 		client, err := authenticator.HTTPClient(ctx, provider)
 		if err != nil {
-			return nil, err
+			slog.Error("failed to create HTTP client for account", "account", account.Name, "error", err)
+			errs = append(errs, fmt.Errorf("account %q: %w", account.Name, err))
+			continue
 		}
 
 		accountEvents, err := service.FetchEvents(ctx, account, query, client)
 		if err != nil {
-			return nil, err
+			slog.Error("failed to fetch events for account", "account", account.Name, "error", err)
+			errs = append(errs, fmt.Errorf("account %q: %w", account.Name, err))
+			continue
 		}
 
+		successCount++
 		events = append(events, accountEvents...)
+	}
+
+	if successCount == 0 && len(errs) > 0 {
+		return nil, errors.Join(errs...)
 	}
 
 	sort.Slice(events, func(i, j int) bool {
