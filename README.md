@@ -5,6 +5,7 @@ A CLI tool that fetches upcoming Google Calendar events and prints [Waybar](http
 ## Prerequisites
 
 - [Go](https://go.dev/) 1.26+
+- [Nerd Font](https://www.nerdfonts.com/)-patched font (e.g., `ttf-jetbrains-mono-nerd`) for icon rendering
 - [mise](https://mise.jdx.dev/) (optional, for dev tasks)
 
 ## Install
