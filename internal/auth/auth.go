@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"runtime"
 	"time"
@@ -118,13 +119,21 @@ func (a *Authenticator) Authenticate(ctx context.Context, provider providers.Pro
 				return refreshed, nil
 			}
 
-			slog.Debug("token refresh failed, clearing token", "provider", provider.Name(), "error", err)
+			// Only clear stored tokens for terminal auth failures.
+			// Transient errors (network issues, timeouts) should preserve
+			// the token so the next attempt can retry.
+			if isTerminalAuthError(err) {
+				slog.Debug("token refresh failed with terminal error, clearing token", "provider", provider.Name(), "error", err)
 
-			// Refresh failed - clear the invalid token and require re-auth
-			clearCtx, clearCancel := context.WithTimeout(context.Background(), storeTimeout)
-			defer clearCancel()
-			_ = a.store.Clear(clearCtx, provider.Name())
-			return nil, fmt.Errorf("%w: %v", ErrReauthRequired, err)
+				// Refresh failed terminally - clear the invalid token and require re-auth
+				clearCtx, clearCancel := context.WithTimeout(context.Background(), storeTimeout)
+				defer clearCancel()
+				_ = a.store.Clear(clearCtx, provider.Name())
+				return nil, fmt.Errorf("%w: %v", ErrReauthRequired, err)
+			}
+
+			slog.Debug("token refresh failed with transient error, preserving token", "provider", provider.Name(), "error", err)
+			return nil, err
 		}
 
 		slog.Debug("no refresh token available, requiring re-auth", "provider", provider.Name())
@@ -197,7 +206,27 @@ func (a *Authenticator) refreshToken(ctx context.Context, provider providers.Pro
 	return newToken, nil
 }
 
+// isTerminalAuthError reports whether an error from a token refresh or
+// exchange indicates a permanent failure that invalidates the stored token.
+// Transient errors (network issues, timeouts) return false so the token is
+// preserved for retry.
+func isTerminalAuthError(err error) bool {
+	var retrieveErr *oauth2.RetrieveError
+	if errors.As(err, &retrieveErr) {
+		switch retrieveErr.ErrorCode {
+		case "invalid_grant", "invalid_request", "invalid_client":
+			return true
+		}
+	}
+	return false
+}
+
 // performOAuthFlow performs the full OAuth2 authorization code flow with PKCE.
+//
+// It intentionally uses context.Background() with hardcoded timeouts for the
+// token exchange and storage steps. This prevents caller cancellation (e.g.,
+// Ctrl+C) from corrupting the token state by abandoning an in-flight exchange
+// or write.
 func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers.Provider) (*oauth2.Token, error) {
 	config := providers.ToOAuth2Config(provider)
 
@@ -295,6 +324,8 @@ func (a *Authenticator) performOAuthFlow(ctx context.Context, provider providers
 }
 
 // defaultBrowserOpener opens the given URL in the default browser.
+// If the browser cannot be opened automatically, the URL is printed to stdout
+// so the user can complete the flow manually (e.g., in WSL or containers).
 func defaultBrowserOpener(url string) error {
 	var cmd string
 	var args []string
@@ -311,5 +342,17 @@ func defaultBrowserOpener(url string) error {
 		args = []string{url}
 	}
 
-	return exec.Command(cmd, args...).Start()
+	c := exec.Command(cmd, args...)
+	if err := c.Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "Could not open browser automatically.")
+		fmt.Println("Please open this URL manually:", url)
+		return nil
+	}
+
+	// Reap the child process to avoid leaving zombies.
+	go func() {
+		_ = c.Wait()
+	}()
+
+	return nil
 }
