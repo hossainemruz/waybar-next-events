@@ -39,6 +39,7 @@ type CallbackServer struct {
 	server        *http.Server
 	listener      net.Listener
 	responded     atomic.Bool
+	started       atomic.Bool
 }
 
 // NewCallbackServer creates a new callback server expecting the given state.
@@ -71,22 +72,36 @@ func NewCallbackServer(expectedState string) (*CallbackServer, error) {
 	return srv, nil
 }
 
-// Start starts the callback server in a goroutine.
-// Returns a channel that will be closed when the server is ready to accept connections.
-func (s *CallbackServer) Start() <-chan struct{} {
-	ready := make(chan struct{})
+// Start starts the callback server in a goroutine and blocks until it is
+// accepting connections. Returns an error if the server has already been
+// started or fails to become ready within the startup deadline.
+func (s *CallbackServer) Start() error {
+	if !s.started.CompareAndSwap(false, true) {
+		return errors.New("callback server already started")
+	}
+
 	go func() {
 		// Serve always returns a non-nil error, but we only care about unexpected errors
 		if err := s.server.Serve(s.listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("callback server error", "error", err)
 		}
 	}()
-	// Give the server a moment to start accepting connections.
-	// This is a pragmatic fix; the listener is already bound in NewCallbackServer,
-	// so Serve() will start nearly immediately.
-	time.Sleep(50 * time.Millisecond)
-	close(ready)
-	return ready
+
+	// Poll until the server is accepting connections or max retries exceeded.
+	// Each iteration dials the server to confirm it is accepting connections,
+	// then immediately closes the probe connection.
+	addr := s.listener.Addr().String()
+	for i := 0; i < 50; i++ {
+		conn, err := net.DialTimeout("tcp", addr, 10*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Reset the started flag so a retry on this instance is not permanently blocked.
+	s.started.Store(false)
+	return errors.New("callback server failed to start accepting connections")
 }
 
 // Wait waits for the callback result or context cancellation.
@@ -105,7 +120,6 @@ func (s *CallbackServer) Shutdown() {
 	ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 	defer cancel()
 	_ = s.server.Shutdown(ctx)
-	_ = s.listener.Close()
 }
 
 // URL returns the callback URL that should be registered with the OAuth provider.

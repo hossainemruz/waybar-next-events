@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,10 +18,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-
-		// Give server time to start
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		// Simulate callback
 		resp, err := http.Get("http://127.0.0.1:18751/callback?code=auth-code&state=" + expectedState)
@@ -63,8 +63,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		// A request with wrong state should NOT consume the callback slot.
 		// It should receive a 400 response but the flow should remain open.
@@ -117,8 +118,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		resp, err := http.Get("http://127.0.0.1:18751/callback?state=" + expectedState)
 		if err != nil {
@@ -152,8 +154,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		// Provider error callbacks should include state validation.
 		// A valid state should be accepted.
@@ -193,8 +196,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		// An error callback with wrong state should NOT consume the flow.
 		resp, err := http.Get("http://127.0.0.1:18751/callback?error=access_denied&error_description=spoofed&state=" + wrongState)
@@ -243,8 +247,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		// An error callback with NO state should NOT consume the flow.
 		resp, err := http.Get("http://127.0.0.1:18751/callback?error=access_denied&error_description=no+state")
@@ -288,8 +293,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		resp, err := http.Post("http://127.0.0.1:18751/callback", "application/json", strings.NewReader("{}"))
 		if err != nil {
@@ -309,8 +315,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
-		time.Sleep(10 * time.Millisecond)
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		resp, err := http.Get("http://127.0.0.1:18751/wrong-path")
 		if err != nil {
@@ -330,7 +337,9 @@ func TestCallbackServer(t *testing.T) {
 		}
 		defer server.Shutdown()
 
-		server.Start()
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
 
 		// Don't send callback - just wait for timeout
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -342,6 +351,44 @@ func TestCallbackServer(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "context deadline exceeded") {
 			t.Errorf("Wait() error = %v, want context deadline exceeded", err)
+		}
+	})
+
+	t.Run("ReadyBeforeReturn", func(t *testing.T) {
+		// Start() should block until the server is accepting connections,
+		// so immediately after Start() returns, a dial should succeed.
+		server, err := NewCallbackServer("test-state")
+		if err != nil {
+			t.Fatalf("NewCallbackServer() error = %v", err)
+		}
+		defer server.Shutdown()
+
+		if err := server.Start(); err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+
+		// The server should already be accepting connections — no sleep needed.
+		conn, err := net.DialTimeout("tcp", server.listener.Addr().String(), 100*time.Millisecond)
+		if err != nil {
+			t.Fatalf("Dial to callback server failed after Start() returned: %v", err)
+		}
+		_ = conn.Close()
+	})
+
+	t.Run("StartTwiceReturnsError", func(t *testing.T) {
+		server, err := NewCallbackServer("test-state")
+		if err != nil {
+			t.Fatalf("NewCallbackServer() error = %v", err)
+		}
+		defer server.Shutdown()
+
+		if err := server.Start(); err != nil {
+			t.Fatalf("first Start() error = %v", err)
+		}
+
+		// Second call should return an error.
+		if err := server.Start(); err == nil {
+			t.Error("second Start() expected error, got nil")
 		}
 	})
 }
