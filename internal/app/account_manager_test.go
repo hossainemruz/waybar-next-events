@@ -366,7 +366,7 @@ func TestStageSecretsAllowsMissingOptionalSecret(t *testing.T) {
 	}
 }
 
-func TestMergeSecretsIncludesEmptyOptionalSecretPlaceholder(t *testing.T) {
+func TestMergeSecretsOmitsEmptyOptionalSecret(t *testing.T) {
 	fields := []calendar.AccountField{
 		{Key: "required_secret", Secret: true, Required: true},
 		{Key: "optional_secret", Secret: true, Required: false},
@@ -381,12 +381,8 @@ func TestMergeSecretsIncludesEmptyOptionalSecretPlaceholder(t *testing.T) {
 	if merged["required_secret"] != "stored-required" {
 		t.Fatalf("merged[required_secret] = %q, want stored-required", merged["required_secret"])
 	}
-	value, ok := merged["optional_secret"]
-	if !ok {
-		t.Fatal("merged does not include optional_secret placeholder")
-	}
-	if value != "" {
-		t.Fatalf("merged[optional_secret] = %q, want empty string", value)
+	if _, ok := merged["optional_secret"]; ok {
+		t.Fatal("merged should not include optional_secret when it is absent from both updated and existing values")
 	}
 }
 
@@ -487,6 +483,60 @@ func TestAccountManagerLoginAccountReturnsTokenCommitFailure(t *testing.T) {
 	_, err := manager.LoginAccount(context.Background(), LoginAccountInput{AccountID: "work-id"})
 	if err == nil || !strings.Contains(err.Error(), "persist OAuth token") {
 		t.Fatalf("error = %v, want token persistence error", err)
+	}
+}
+
+func TestAccountManagerUpdateAccountDoesNotStageEmptyOptionalSecret(t *testing.T) {
+	loader := newMemoryConfigLoaderWithAccounts([]calendar.Account{{ID: "work-id", Service: calendar.ServiceTypeGoogle, Name: "Work", Settings: map[string]string{"client_id": "client-id"}}}, t)
+	secretStore := secrets.NewInMemoryStore()
+	_ = secretStore.Set(context.Background(), "work-id", "client_secret", "old-client-secret")
+	tokenStore := tokenstore.NewInMemoryTokenStore()
+	service := &stubAppService{
+		serviceType:         calendar.ServiceTypeGoogle,
+		fields:              []calendar.AccountField{{Key: "client_secret", Secret: true}, {Key: "api_key", Secret: true, Required: false}},
+		discoveredCalendars: []calendar.Calendar{{ID: "primary", Name: "Primary"}},
+	}
+	manager := newTestAccountManager(loader, secretStore, tokenStore, service)
+
+	_, err := manager.UpdateAccount(context.Background(), UpdateAccountInput{
+		AccountID:        "work-id",
+		Name:             "Work",
+		Settings:         map[string]string{"client_id": "client-id"},
+		Secrets:          map[string]string{"client_secret": "new-client-secret"},
+		CalendarSelector: &stubCalendarSelector{selected: []calendar.CalendarRef{{ID: "primary", Name: "Primary"}}},
+	})
+	if err != nil {
+		t.Fatalf("UpdateAccount() error = %v", err)
+	}
+	clientSecret, _ := secretStore.Get(context.Background(), "work-id", "client_secret")
+	if clientSecret != "new-client-secret" {
+		t.Fatalf("client_secret = %q, want new-client-secret", clientSecret)
+	}
+	if _, err := secretStore.Get(context.Background(), "work-id", "api_key"); !errors.Is(err, secrets.ErrSecretNotFound) {
+		t.Fatalf("api_key error = %v, want ErrSecretNotFound", err)
+	}
+}
+
+func TestDiscoverAndSelectCalendarsReturnsErrorWhenNoCalendarsAndNoSelector(t *testing.T) {
+	loader := newMemoryConfigLoader(t)
+	secretStore := secrets.NewInMemoryStore()
+	tokenStore := tokenstore.NewInMemoryTokenStore()
+	service := &stubAppService{
+		serviceType:         calendar.ServiceTypeGoogle,
+		discoveredCalendars: []calendar.Calendar{},
+	}
+	manager := newTestAccountManager(loader, secretStore, tokenStore, service)
+
+	_, err := manager.discoverAndSelectCalendars(
+		context.Background(),
+		service,
+		calendar.Account{ID: "work-id", Service: calendar.ServiceTypeGoogle},
+		secretStore,
+		&stubAuthenticator{store: tokenStore},
+		nil,
+	)
+	if !errors.Is(err, ErrNoCalendarsDiscovered) {
+		t.Fatalf("error = %v, want ErrNoCalendarsDiscovered", err)
 	}
 }
 
