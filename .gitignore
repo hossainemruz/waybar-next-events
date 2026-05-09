@@ -7,6 +7,7 @@ go.work.sum
 
 # Binary files
 bin/
+dist/
 
 # Editor/IDE
 # .idea/

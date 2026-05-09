@@ -1,0 +1,54 @@
+version: 2
+
+project_name: waybar-next-events
+
+builds:
+  - id: waybar-next-events
+    main: ./cmd/waybar-next-events
+    binary: waybar-next-events
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X github.com/hossainemruz/waybar-next-events/internal/cli/commands.Version={{ .Tag }}
+
+archives:
+  - id: default
+    ids:
+      - waybar-next-events
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE*
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^Merge pull request"
+      - "^Merge branch"
+
+release:
+  github:
+    owner: hossainemruz
+    name: waybar-next-events
+  use_existing_draft: true
+  replace_existing_artifacts: true
+  prerelease: auto
