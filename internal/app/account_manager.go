@@ -321,8 +321,9 @@ func (m *AccountManager) discoverAndSelectCalendars(ctx context.Context, service
 			if err := selector.ConfirmEmptyCalendars(ctx, account); err != nil {
 				return nil, err
 			}
+			return []calendar.CalendarRef{}, nil
 		}
-		return []calendar.CalendarRef{}, nil
+		return nil, ErrNoCalendarsDiscovered
 	}
 
 	if selector == nil {
@@ -509,9 +510,8 @@ func mergeSecrets(existing map[string]secretSnapshot, updated map[string]string,
 			continue
 		}
 
-		if !field.Required {
-			merged[field.Key] = ""
-		}
+		// Skip optional secret fields when both the user-provided value and
+		// existing stored value are empty or missing. Do not stage them as "".
 	}
 
 	return merged

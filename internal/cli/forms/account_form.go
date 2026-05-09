@@ -28,6 +28,9 @@ func NewAccountFieldsForm(
 	// Bind field values to stable pointers so the form can update them.
 	fieldValues := make(map[string]*string, len(fields))
 	for _, field := range fields {
+		// s must be declared inside the loop body so each iteration gets a
+		// distinct variable. Moving it outside would cause every map entry to
+		// alias the same pointer, corrupting the collected results.
 		s := ""
 		if defaults.Settings != nil {
 			if v, ok := defaults.Settings[field.Key]; ok {
