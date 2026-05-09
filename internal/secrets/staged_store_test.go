@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -159,6 +160,48 @@ func TestSortedSecretRefsRejectsInvalidKeys(t *testing.T) {
 	if err == nil {
 		t.Fatal("sortedSecretRefs() error = nil, want invalid key error")
 	}
+}
+
+func TestStagedStoreGetNoRace(t *testing.T) {
+	ctx := context.Background()
+	staged := NewStagedStore()
+
+	// Seed staged store so Get races over actual data.
+	if err := staged.Set(ctx, "account-1", "client_secret", "original"); err != nil {
+		t.Fatalf("Set() error = %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = staged.Get(ctx, "account-1", "client_secret")
+		}()
+	}
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = staged.Set(ctx, "account-1", "client_secret", "updated")
+		}()
+	}
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = staged.Delete(ctx, "account-1", "client_secret")
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			staged.Discard()
+		}()
+	}
+
+	wg.Wait()
 }
 
 type failingStore struct {

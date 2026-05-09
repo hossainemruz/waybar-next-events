@@ -1,3 +1,9 @@
+// Package secrets provides storage backends for sensitive values.
+//
+// The keyring-backed stores wrap OS keyring calls in goroutines so that
+// context cancellation can interrupt long-running operations. A known tradeoff
+// is that when the context is cancelled the goroutine may remain blocked on
+// the underlying keyring call until the OS returns.
 package secrets
 
 import (
