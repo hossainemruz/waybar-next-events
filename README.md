@@ -2,6 +2,17 @@
 
 A CLI tool that fetches upcoming Google Calendar events and prints [Waybar](https://github.com/Alexays/Waybar)-compatible JSON.
 
+## Screenshots
+
+- Ongoing event
+  ![Ongoing event](docs/images/ongoing-meeting.png)
+- Upcoming event
+  ![Upcoming event](docs/images/upcoming-meeting.png)
+- No more events for rest of the day
+  ![No more events](docs/images/no-meeting.png)
+- List of events on hover
+  ![List of events on hover](docs/images/on-hover.png)
+
 ## Prerequisites
 
 - [Nerd Font](https://www.nerdfonts.com/) (recommended, for icon rendering)
@@ -104,13 +115,19 @@ waybar-next-events list
 Output is Waybar JSON on stdout — safe to use directly in your Waybar config:
 
 ```json
-{"text":"󰃰 Standup (starts in 15m)","tooltip":"<b>Today</b>\n 9:00AM -  9:30AM    Standup\n\n<b>Tomorrow</b>\n... "}
+{
+  "text": "󰃰 Standup (starts in 15m)",
+  "tooltip": "<b>Today</b>\n 9:00AM -  9:30AM    Standup\n\n<b>Tomorrow</b>\n... "
+}
 ```
 
 When there are no more events today:
 
 ```json
-{"text":" No more events today!","tooltip":"<b>Today</b>\nAll day              Lunch with team\n... "}
+{
+  "text": " No more events today!",
+  "tooltip": "<b>Today</b>\nAll day              Lunch with team\n... "
+}
 ```
 
 Flags:
@@ -124,12 +141,12 @@ Run `waybar-next-events list --help` to see all available flags.
 
 ### Manage accounts
 
-| Command | Description |
-|---------|-------------|
-| `account add` | Add a new calendar account |
+| Command          | Description                |
+| ---------------- | -------------------------- |
+| `account add`    | Add a new calendar account |
 | `account update` | Update an existing account |
-| `account delete` | Delete an account |
-| `account login` | Re-authenticate an account |
+| `account delete` | Delete an account          |
+| `account login`  | Re-authenticate an account |
 
 ## Waybar integration
 
@@ -151,15 +168,15 @@ You will need [Go](https://go.dev/) 1.26+ and [mise](https://mise.jdx.dev/) to r
 
 Common tasks via mise:
 
-| Task | Command |
-|------|---------|
-| Run checks | `mise run all` |
-| Build | `mise run build` |
-| Format | `mise run format` |
-| Lint | `mise run lint` |
-| Test | `mise run test` |
-| Tidy | `mise run tidy` |
-| Dev run | `mise run dev` |
+| Task          | Command                          |
+| ------------- | -------------------------------- |
+| Run checks    | `mise run all`                   |
+| Build         | `mise run build`                 |
+| Format        | `mise run format`                |
+| Lint          | `mise run lint`                  |
+| Test          | `mise run test`                  |
+| Tidy          | `mise run tidy`                  |
+| Dev run       | `mise run dev`                   |
 | Run a command | `mise run cmd list -- --limit 3` |
 
 Or use `go` directly:
