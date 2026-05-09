@@ -28,14 +28,13 @@ func (s *StagedStore) Get(ctx context.Context, accountID, key string) (string, e
 	storage := storageKey(accountID, key)
 
 	s.mu.Lock()
-	store := s.store
-	_, deleted := s.deletedKeys[storage]
-	s.mu.Unlock()
-	if deleted {
+	defer s.mu.Unlock()
+
+	if _, deleted := s.deletedKeys[storage]; deleted {
 		return "", ErrSecretNotFound
 	}
 
-	return store.Get(ctx, accountID, key)
+	return s.store.Get(ctx, accountID, key)
 }
 
 // Set stages a secret write.
